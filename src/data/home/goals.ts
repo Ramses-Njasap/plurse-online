@@ -20,7 +20,7 @@ export const SLIDES: Slide[] = [
     image:      "https://images.unsplash.com/photo-1553413077-190dd305871c?w=1000&q=85",
     imageAlt:   "Warehouse inventory management",
     primaryCta:   { label: "Get started",              href: "/download" },
-    secondaryCta: { label: "See inventory features",   href: "/features#inventory" },
+    secondaryCta: { label: "See inventory solution",   href: "/solutions/inventory" },
   },
   {
     id:         "cashflow",
@@ -30,7 +30,7 @@ export const SLIDES: Slide[] = [
     image:      "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=1000&q=85",
     imageAlt:   "Financial dashboard and cash flow analytics",
     primaryCta:   { label: "Get started",            href: "/download" },
-    secondaryCta: { label: "Explore cashflow tools", href: "/features#cashflow" },
+    secondaryCta: { label: "Explore cashflow solution", href: "/solutions/cashflow" },
   },
   {
     id:         "sales",
@@ -40,7 +40,7 @@ export const SLIDES: Slide[] = [
     image:      "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1000&q=85",
     imageAlt:   "Sales analytics and performance charts",
     primaryCta:   { label: "Get started",          href: "/download" },
-    secondaryCta: { label: "View analytics demo",  href: "/features#analytics" },
+    secondaryCta: { label: "Know more about how it works",  href: "/solutions/sales" },
   },
   {
     id:         "customers",
@@ -50,7 +50,7 @@ export const SLIDES: Slide[] = [
     image:      "https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?w=1000&q=85",
     imageAlt:   "Customer service and relationship management",
     primaryCta:   { label: "Get started",             href: "/download" },
-    secondaryCta: { label: "See customer features",   href: "/features#customers" },
+    secondaryCta: { label: "See how we improve your customer relationships",   href: "/solutions/customers" },
   },
   {
     id:         "team",
@@ -60,6 +60,6 @@ export const SLIDES: Slide[] = [
     image:      "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=1000&q=85",
     imageAlt:   "Business team collaboration",
     primaryCta:   { label: "Get started",             href: "/download" },
-    secondaryCta: { label: "Learn about team access", href: "/features#team" },
+    secondaryCta: { label: "Learn about team access", href: "/solutions/team" },
   },
 ];
