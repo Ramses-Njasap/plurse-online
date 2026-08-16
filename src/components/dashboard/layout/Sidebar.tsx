@@ -28,7 +28,7 @@ export function DashboardSidebar({ open, onClose }: DashboardSidebarProps) {
 
     return (
         <>
-            {/* Backdrop overlay for click-outside close */}
+            {/* Backdrop overlay for click-outside close (mobile only) */}
             <div
                 className="fixed inset-0 z-40 bg-black/30 lg:hidden"
                 onClick={onClose}
@@ -40,17 +40,16 @@ export function DashboardSidebar({ open, onClose }: DashboardSidebarProps) {
                 }}
             />
 
-            {/* Sidebar Drawer: 75vw width on mobile, 220px on desktop */}
+            {/* Sidebar Drawer */}
             <aside
-                className={`fixed inset-y-0 left-0 z-50 flex w-[75vw] max-w-[310px] shrink-0 flex-col border-r lg:static lg:z-10 lg:w-[220px] lg:translate-x-0 ${open ? "translate-x-0 opacity-100" : "-translate-x-full opacity-0 lg:opacity-100"
+                className={`fixed inset-y-0 left-0 z-50 flex w-[75vw] max-w-[310px] shrink-0 flex-col border-r transition-all duration-300 lg:static lg:z-10 lg:w-[220px] lg:translate-x-0 lg:opacity-100 ${open ? "translate-x-0 opacity-100" : "-translate-x-full opacity-0"
                     }`}
                 style={{
                     borderColor: "var(--border)",
                     background: "var(--surface)",
-                    transition: "transform 300ms cubic-bezier(0.16, 1, 0.3, 1), opacity 260ms ease",
                 }}
             >
-                {/* Header with Logo + Header Right Close Button */}
+                {/* Header with Logo + Mobile Close Toggle */}
                 <div
                     className="flex h-[60px] items-center justify-between border-b px-5 shrink-0"
                     style={{ borderColor: "var(--border)" }}
@@ -67,7 +66,7 @@ export function DashboardSidebar({ open, onClose }: DashboardSidebarProps) {
                         </span>
                     </div>
 
-                    {/* Animated Hamburger/Arrow Close Trigger inside Drawer Header */}
+                    {/* Animated Hamburger/Arrow Close Trigger inside Drawer Header (Mobile Only) */}
                     <button
                         type="button"
                         onClick={onClose}
@@ -82,7 +81,6 @@ export function DashboardSidebar({ open, onClose }: DashboardSidebarProps) {
                                 background: "var(--foreground)",
                                 transform: "translateY(3.5px) rotate(45deg)",
                                 transformOrigin: "center",
-                                transition: "transform 280ms cubic-bezier(.4,0,.2,1)",
                             }}
                         />
                         <span
@@ -94,7 +92,6 @@ export function DashboardSidebar({ open, onClose }: DashboardSidebarProps) {
                                 opacity: 0,
                                 alignSelf: "flex-start",
                                 marginLeft: "3px",
-                                transition: "opacity 180ms ease",
                             }}
                         />
                         <span
@@ -105,7 +102,6 @@ export function DashboardSidebar({ open, onClose }: DashboardSidebarProps) {
                                 background: "var(--foreground)",
                                 transform: "translateY(-3.5px) rotate(-45deg)",
                                 transformOrigin: "center",
-                                transition: "transform 280ms cubic-bezier(.4,0,.2,1)",
                             }}
                         />
                     </button>
@@ -113,21 +109,17 @@ export function DashboardSidebar({ open, onClose }: DashboardSidebarProps) {
 
                 {/* Main Navigation */}
                 <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
-                    {NAV.map(({ href, label, icon: Icon }, i) => {
+                    {NAV.map(({ href, label, icon: Icon }) => {
                         const active = pathname === href;
                         return (
                             <Link
                                 key={href}
                                 href={href}
                                 onClick={onClose}
-                                className="flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-[14px] font-medium transition-all duration-200"
+                                className="flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-[14px] font-medium transition-all duration-150"
                                 style={{
                                     background: active ? "var(--brand-light)" : "transparent",
                                     color: active ? "var(--brand)" : "var(--text-muted)",
-                                    transform: open ? "translateY(0)" : "translateY(6px)",
-                                    opacity: open ? 1 : 0,
-                                    transition: `transform 280ms cubic-bezier(0.16, 1, 0.3, 1) ${i * 30 + 40
-                                        }ms, opacity 280ms ease ${i * 30 + 40}ms, background 150ms ease`,
                                 }}
                             >
                                 <Icon size={17} active={active} />
