@@ -6,7 +6,7 @@ export async function middleware(request: NextRequest) {
     let response = NextResponse.next({ request })
 
     const supabase = createServerClient(
-        process.env.SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.SUPABASE_PUBLISHABLE_KEY!,
         {
             cookies: {
