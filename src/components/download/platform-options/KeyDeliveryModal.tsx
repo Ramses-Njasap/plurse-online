@@ -10,7 +10,7 @@
    ───────────────────────────────────────────────────────────────── */
 
 import { useEffect, useState } from "react";
-import type { AccessKey } from "@/app/(dashboard)/dashboard/my/keys/data/mockKeys";
+import type { AccessKey } from "@/types/users.types";
 
 interface KeyDeliveryModalProps {
     accessKey: AccessKey;
@@ -186,7 +186,7 @@ export function KeyDeliveryModal({ accessKey, platform, onClose }: KeyDeliveryMo
                                 <span
                                     className="rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize"
                                     style={
-                                        accessKey.key_type === "lifetime"
+                                        accessKey.key_type === "LIFETIME"
                                             ? { background: "rgba(59,130,246,0.10)", color: "#3b82f6" }
                                             : { background: "rgba(245,158,11,0.10)", color: "#d97706" }
                                     }

@@ -39,7 +39,7 @@ export async function forgotPasswordSubmitAction(email: string, typedCode: strin
 
         if (updateError) {
             // return { success: false, message: "Could not overwrite credentials. Try a stronger password." };
-            return { success: false, message: updateError };
+            return { success: false, message: updateError.message ?? "Could not overwrite credentials. Try a stronger password." };
         }
 
         // 4. Clear out the used OTP token immediately so it can never be reused

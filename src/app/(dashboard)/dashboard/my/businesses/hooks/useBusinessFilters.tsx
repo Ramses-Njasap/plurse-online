@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { type Business, MOCK_BUSINESSES } from "../data/mockBusinessData";
+import type { Business } from "@/types/users.types";
 
 export type SortField = "name" | "created_on" | "updated_on" | "country";
 export type SortDir = "asc" | "desc";
@@ -55,7 +55,7 @@ export function useBusinessFilters(dataset: Business[]) {
                 (b) =>
                     b.name.toLowerCase().includes(q) ||
                     b.id.toLowerCase().includes(q) ||
-                    b.manager_profile.full_name.toLowerCase().includes(q) ||
+                    b.manager_profile?.full_name?.toLowerCase().includes(q) ||
                     b.region_city.toLowerCase().includes(q) ||
                     b.country.toLowerCase().includes(q)
             );

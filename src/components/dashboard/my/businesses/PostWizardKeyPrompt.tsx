@@ -1,6 +1,6 @@
 "use client";
 
-import { type Business } from "@/app/(dashboard)/dashboard/my/businesses/data/mockBusinessData";
+import type { Business } from "@/types/users.types";
 
 interface PostWizardKeyPromptProps {
     business: Business;

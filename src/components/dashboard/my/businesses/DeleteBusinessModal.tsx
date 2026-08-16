@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
-import { type Business, formatDate, maskKeyCode } from "@/app/(dashboard)/dashboard/my/businesses/data/mockBusinessData";
+import { formatDate, maskKeyCode } from "@/app/(dashboard)/dashboard/my/businesses/data/mockBusinessData";
+import type { Business } from "@/types/users.types";
 
 interface DeleteBusinessModalProps {
     business: Business;
@@ -46,7 +47,7 @@ export function DeleteBusinessModal({ business, onConfirm, onCancel }: DeleteBus
                     <InfoRow label="Name" value={b.name} />
                     <InfoRow label="ID" value={<span className="font-mono text-[11px]">{b.id}</span>} />
                     <InfoRow label="Location" value={`${b.region_city}, ${b.country}`} />
-                    <InfoRow label="Manager" value={b.manager_profile.full_name} />
+                    <InfoRow label="Manager" value={b?.manager_profile?.full_name} />
                 </div>
 
                 {/* Access key */}

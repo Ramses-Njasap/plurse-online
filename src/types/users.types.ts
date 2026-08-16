@@ -17,7 +17,7 @@ export interface UserAccount {
 export interface UserProfile {
     id: string;
     user_id: string;
-    full_name: string;
+    full_name?: string;
     date_of_birth: string;
     country: string;
     region_city: string;

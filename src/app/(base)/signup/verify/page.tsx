@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { BrandPanel } from "@/components/signup/shared-with-login/BrandPanel";
 import { OtpVerification } from "@/components/signup/verify/shared-with-forgot-password/OtpVerification";
 
@@ -10,7 +10,9 @@ import { verifyOtpAction } from "@/app/actions/verify";
 import { resendOtpAction } from "@/app/actions/resend";
 
 /* ════════════════════════════════════════════ */
-export default function VerifyPage() {
+// 1. Inner Content Component
+/* ════════════════════════════════════════════ */
+function VerifyContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
 
@@ -87,5 +89,20 @@ export default function VerifyPage() {
                 </div>
             </div>
         </div>
+    );
+}
+
+/* ════════════════════════════════════════════ */
+// 2. Exported Default Page Component Wrapped in Suspense
+/* ════════════════════════════════════════════ */
+export default function VerifyPage() {
+    return (
+        <Suspense fallback={
+            <div className="flex min-h-[calc(100vh-68px)] items-center justify-center text-xs font-medium text-[#0F0F0F]/40">
+                Loading verification...
+            </div>
+        }>
+            <VerifyContent />
+        </Suspense>
     );
 }

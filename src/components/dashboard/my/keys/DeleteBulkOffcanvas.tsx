@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { type AccessKey, formatDate, maskKeyCode, formatAmount, getExpiryStatus } from "@/app/(dashboard)/dashboard/my/keys/data/mockKeys";
+import { formatDate, maskKeyCode, formatAmount, getExpiryStatus } from "@/app/(dashboard)/dashboard/my/keys/data/mockKeys";
+import type { AccessKey } from "@/types/users.types";
 
 interface DeleteBulkOffcanvasProps {
     keys: AccessKey[];
