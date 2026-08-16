@@ -2,38 +2,84 @@
 
 // ActivationModal.tsx
 // ─────────────────────────────────────────────────────────────────────────────
-// Centered modal with scrim — appears after download triggers.
-// Two actions: "Get an activation key" (links to /activation) or "I have one" (closes).
+// Shown after download triggers.
+//
+// "Get an activation key" → NewKeyModal (standalone mode, create-only)
+//                         → PaymentModal (gated inside NewKeyModal)
+//                         → KeyDeliveryModal (copy + auto-download .txt)
+// "I already have one"   → closes as before
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { NewKeyModal } from "@/components/dashboard/my/keys/new-key-modal";
+import { KeyDeliveryModal } from "./KeyDeliveryModal";
+import type { AccessKey } from "@/app/(dashboard)/dashboard/my/keys/data/mockKeys";
 
 interface Props {
-  open:     boolean;
-  onClose:  () => void;
-  platform: string; // e.g. "Windows" — shown in the message
+  open: boolean;
+  onClose: () => void;
+  platform: string;
 }
 
+type InnerView = "prompt" | "new-key" | "delivery";
+
 const ActivationModal = ({ open, onClose, platform }: Props) => {
-  // Lock scroll when open
+  const [view, setView] = useState<InnerView>("prompt");
+  const [createdKey, setCreatedKey] = useState<AccessKey | null>(null);
+
+  /* Reset inner state whenever the modal is opened */
+  useEffect(() => {
+    if (open) { setView("prompt"); setCreatedKey(null); }
+  }, [open]);
+
+  /* Lock scroll */
   useEffect(() => {
     document.body.style.overflow = open ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
   }, [open]);
 
-  // Close on ESC
+  /* ESC — only on the prompt view; inner modals handle their own ESC */
   useEffect(() => {
-    if (!open) return;
+    if (!open || view !== "prompt") return;
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [open, onClose]);
+  }, [open, view, onClose]);
 
   if (!open) return null;
 
+  /* ── "Get a key" button clicked → mount NewKeyModal ── */
+  if (view === "new-key") {
+    return (
+      <NewKeyModal
+        standalone           /* create-only, no "link to business" */
+        onClose={() => setView("prompt")}   /* cancel → back to prompt */
+        onKeyCreated={(key) => {
+          setCreatedKey(key);
+          setView("delivery");             /* success → delivery modal */
+        }}
+      />
+    );
+  }
+
+  /* ── Key created → delivery modal ── */
+  if (view === "delivery" && createdKey) {
+    return (
+      <KeyDeliveryModal
+        accessKey={createdKey}
+        platform={platform}
+        onClose={() => {
+          setView("prompt");
+          onClose();              /* close the whole activation flow */
+        }}
+      />
+    );
+  }
+
+  /* ── Default: the original prompt modal ── */
   return (
     <>
-      {/* ── Scrim ── */}
+      {/* Scrim */}
       <div
         className="fixed inset-0 z-50 flex items-center justify-center px-5"
         style={{
@@ -44,70 +90,68 @@ const ActivationModal = ({ open, onClose, platform }: Props) => {
         }}
         onClick={onClose}
       >
-        {/* ── Modal panel — stop propagation so clicking inside doesn't close ── */}
+        {/* Panel */}
         <div
-          className="relative flex flex-col w-full"
+          className="relative flex w-full flex-col"
           style={{
-            maxWidth:     "420px",
-            background:   "var(--surface)",
+            maxWidth: "420px",
+            background: "var(--surface)",
             borderRadius: "20px",
-            padding:      "36px 32px 28px",
-            boxShadow:    "0 24px 64px rgba(15,23,42,0.18), 0 4px 16px rgba(15,23,42,0.08)",
-            animation:    "modalSlideUp 280ms cubic-bezier(0.22,1,0.36,1) both",
+            padding: "36px 32px 28px",
+            boxShadow: "0 24px 64px rgba(15,23,42,0.18), 0 4px 16px rgba(15,23,42,0.08)",
+            animation: "modalSlideUp 280ms cubic-bezier(0.22,1,0.36,1) both",
           }}
-          onClick={e => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
         >
-          {/* Close button */}
+          {/* Close */}
           <button
             onClick={onClose}
             className="absolute flex items-center justify-center rounded-lg"
             style={{
-              top:        "16px",
-              right:      "16px",
-              width:      "28px",
-              height:     "28px",
+              top: "16px", right: "16px",
+              width: "28px", height: "28px",
               background: "var(--surface-muted)",
-              border:     "none",
-              cursor:     "pointer",
-              color:      "var(--text-muted)",
+              border: "none",
+              cursor: "pointer",
+              color: "var(--text-muted)",
               transition: "background 150ms, color 150ms",
             }}
-            onMouseEnter={e => {
+            onMouseEnter={(e) => {
               e.currentTarget.style.background = "var(--brand-light)";
-              e.currentTarget.style.color      = "var(--brand)";
+              e.currentTarget.style.color = "var(--brand)";
             }}
-            onMouseLeave={e => {
+            onMouseLeave={(e) => {
               e.currentTarget.style.background = "var(--surface-muted)";
-              e.currentTarget.style.color      = "var(--text-muted)";
+              e.currentTarget.style.color = "var(--text-muted)";
             }}
             aria-label="Close"
           >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
             </svg>
           </button>
 
           {/* Icon */}
           <div
-            className="flex items-center justify-center rounded-2xl mb-6 self-start"
+            className="mb-6 flex items-center justify-center self-start rounded-2xl"
             style={{
-              width:      "48px",
-              height:     "48px",
+              width: "48px", height: "48px",
               background: "var(--brand-light)",
-              border:     "1px solid rgba(59,130,246,0.18)",
+              border: "1px solid rgba(59,130,246,0.18)",
             }}
           >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+              stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
             </svg>
           </div>
 
           {/* Heading */}
           <h3
-            className="font-bold tracking-[-0.02em] mb-2"
+            className="mb-2 font-bold tracking-[-0.02em]"
             style={{
-              fontSize:   "20px",
-              color:      "var(--foreground)",
+              fontSize: "20px",
+              color: "var(--foreground)",
               fontFamily: "var(--font-geist-sans)",
             }}
           >
@@ -116,7 +160,7 @@ const ActivationModal = ({ open, onClose, platform }: Props) => {
 
           {/* Body */}
           <p
-            className="text-[14px] leading-[1.7] mb-8"
+            className="mb-8 text-[14px] leading-[1.7]"
             style={{ color: "var(--text-muted)" }}
           >
             Plurse requires an activation key to run. Do you already have one,
@@ -125,48 +169,47 @@ const ActivationModal = ({ open, onClose, platform }: Props) => {
 
           {/* Actions */}
           <div className="flex flex-col gap-3">
-            {/* Primary — get a key */}
-            <Link
-              href="/activation"
-              className="w-full flex items-center justify-center gap-2 font-semibold rounded-xl"
+            {/* Primary — get a key → opens NewKeyModal */}
+            <button
+              type="button"
+              onClick={() => setView("new-key")}
+              className="flex w-full items-center justify-center gap-2 rounded-xl font-semibold text-white transition-all"
               style={{
-                padding:        "13px 20px",
-                fontSize:       "14.5px",
-                background:     "var(--brand)",
-                color:          "white",
-                textDecoration: "none",
-                transition:     "background 150ms ease",
+                padding: "13px 20px",
+                fontSize: "14.5px",
+                background: "var(--brand)",
+                border: "none",
+                cursor: "pointer",
               }}
-              onMouseEnter={e => (e.currentTarget.style.background = "var(--brand-hover)")}
-              onMouseLeave={e => (e.currentTarget.style.background = "var(--brand)")}
-              onClick={onClose}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--brand-hover)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "var(--brand)")}
             >
               Get an activation key
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
-                <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-            </Link>
+            </button>
 
             {/* Secondary — already have one */}
             <button
               onClick={onClose}
-              className="w-full flex items-center justify-center font-medium rounded-xl"
+              className="flex w-full items-center justify-center rounded-xl font-medium transition-all"
               style={{
-                padding:    "13px 20px",
-                fontSize:   "14.5px",
+                padding: "13px 20px",
+                fontSize: "14.5px",
                 background: "none",
-                color:      "var(--text-muted)",
-                border:     "1px solid var(--border-strong)",
-                cursor:     "pointer",
+                color: "var(--text-muted)",
+                border: "1px solid var(--border-strong)",
+                cursor: "pointer",
                 transition: "border-color 150ms, color 150ms",
               }}
-              onMouseEnter={e => {
+              onMouseEnter={(e) => {
                 e.currentTarget.style.borderColor = "var(--brand)";
-                e.currentTarget.style.color       = "var(--brand)";
+                e.currentTarget.style.color = "var(--brand)";
               }}
-              onMouseLeave={e => {
+              onMouseLeave={(e) => {
                 e.currentTarget.style.borderColor = "var(--border-strong)";
-                e.currentTarget.style.color       = "var(--text-muted)";
+                e.currentTarget.style.color = "var(--text-muted)";
               }}
             >
               I already have one
@@ -176,18 +219,17 @@ const ActivationModal = ({ open, onClose, platform }: Props) => {
       </div>
 
       <style>{`
-        @keyframes scrimFadeIn {
-          from { opacity: 0; }
-          to   { opacity: 1; }
-        }
-        @keyframes modalSlideUp {
-          from { opacity: 0; transform: translateY(20px) scale(0.97); }
-          to   { opacity: 1; transform: translateY(0)    scale(1);    }
-        }
-      `}</style>
+                @keyframes scrimFadeIn {
+                    from { opacity: 0; }
+                    to   { opacity: 1; }
+                }
+                @keyframes modalSlideUp {
+                    from { opacity: 0; transform: translateY(20px) scale(0.97); }
+                    to   { opacity: 1; transform: translateY(0)    scale(1);    }
+                }
+            `}</style>
     </>
   );
-}
-
+};
 
 export default ActivationModal;

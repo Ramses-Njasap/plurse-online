@@ -13,12 +13,12 @@
 import { useState, useEffect } from "react";
 import type { PlatformId } from "@/data/download/download";
 import { getPlatform } from "@/data/download/download";
-import { useDetectedPlatform } from "./useDetectedPlatform";
-import Hero from "./header/Hero";
-import PlatformSelector from "./platform-options/PlatformSelector";
-import ActivationModal from "./platform-options/ActivationModal";
-import InstallGuide from "./install-guide/InstallGuide";
-import WhatsNew from "./version-update/WhatsNew";
+import { useDetectedPlatform } from "@/components/download/useDetectedPlatform";
+import Hero from "@/components/download/header/Hero";
+import PlatformSelector from "@/components/download/platform-options/PlatformSelector";
+import ActivationModal from "@/components/download/platform-options/ActivationModal";
+import InstallGuide from "@/components/download/install-guide/InstallGuide";
+import WhatsNew from "@/components/download/version-update/WhatsNew";
 // Future imports — uncomment as each section is built:
 // import PlatformSelector     from "./PlatformSelector";
 // import InstallGuide         from "./InstallGuide";

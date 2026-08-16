@@ -20,21 +20,21 @@ function detectPlatform(): PlatformId {
 
   if (uaData?.platform) {
     const p = uaData.platform.toLowerCase();
-    if (p.includes("win"))   return "windows";
-    if (p.includes("mac"))   return "macos";
+    if (p.includes("win")) return "windows";
+    if (p.includes("mac")) return "macos";
     if (p.includes("linux")) return "linux";
   }
 
   // ── Method 2: navigator.userAgent string parsing (universal fallback) ──
   const ua = navigator.userAgent.toLowerCase();
-  if (ua.includes("win"))                          return "windows";
+  if (ua.includes("win")) return "windows";
   if (ua.includes("mac") || ua.includes("iphone") || ua.includes("ipad")) return "macos";
-  if (ua.includes("linux") || ua.includes("android"))                      return "linux";
+  if (ua.includes("linux") || ua.includes("android")) return "linux";
 
   // ── Method 3: navigator.platform (deprecated but broad support) ──
   const platform = (navigator.platform ?? "").toLowerCase();
-  if (platform.startsWith("win"))   return "windows";
-  if (platform.startsWith("mac"))   return "macos";
+  if (platform.startsWith("win")) return "windows";
+  if (platform.startsWith("mac")) return "macos";
   if (platform.startsWith("linux")) return "linux";
 
   // Final fallback
