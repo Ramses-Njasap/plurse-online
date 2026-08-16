@@ -7,7 +7,7 @@ import { isTimestampExpired } from "../utils/func";
 import { TRIAL_PERIOD_DAYS } from "../utils/constants";
 
 const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
@@ -89,7 +89,7 @@ export interface FetchKeysResponse {
 
 export async function fetchAuthenticatedAccessKeys(): Promise<FetchKeysResponse> {
     const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_URL!,
         process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 

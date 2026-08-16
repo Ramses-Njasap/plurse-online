@@ -13,7 +13,7 @@ export type FetchBusinessesResponse =
 
 export async function fetchAuthenticatedBusinesses(): Promise<FetchBusinessesResponse> {
     const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_URL!,
         process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
@@ -147,7 +147,7 @@ export async function fetchAuthenticatedBusinesses(): Promise<FetchBusinessesRes
 
 
 const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 

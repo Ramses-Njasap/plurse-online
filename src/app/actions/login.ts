@@ -6,7 +6,7 @@ import { createPersistentSession } from "@/app/utils/auth";
 
 // Keep this ONLY for admin-level database operations (bypassing RLS during auto-heal)
 const supabaseAdmin = createAdminClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
