@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import GridBackground from "../components/Background";
-import Navbar from "../components/Navbar";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -21,23 +19,15 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      {/* bg-[#FAFAF9] matches the warm-neutral base in GridBackground */}
-      <body className="min-h-full flex flex-col bg-[#FAFAF9]">
-        <GridBackground />
-        <Navbar />
-        {/* pt-[68px] offsets fixed navbar height */}
-        <main className="relative z-10 flex-1 pt-[68px]">
-          {children}
-        </main>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

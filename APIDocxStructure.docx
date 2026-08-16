@@ -1,0 +1,35 @@
+### Testing Checklist
+
+**Basic CRUD:**
+- [ ] POST /api/users - Create user
+- [ ] GET /api/users - Get all users
+- [ ] GET /api/users/:id - Get single user
+- [ ] PUT /api/users/:id - Update user
+- [ ] DELETE /api/users/:id - Soft delete
+
+**Status Management:**
+- [ ] GET /api/users/:id/status - Get status
+- [ ] POST /api/users/:id/status?action=disable - Disable
+- [ ] POST /api/users/:id/status?action=enable - Enable
+- [ ] POST /api/users/:id/status?action=deactivate - Deactivate
+- [ ] POST /api/users/:id/status?action=activate - Activate
+- [ ] POST /api/users/:id/status?action=restore - Restore
+
+**Delete Operations:**
+- [ ] DELETE /api/users/:id (soft)
+- [ ] DELETE /api/users/:id?permanent=true (hard)
+- [ ] POST /api/users/:id/status?action=restore
+
+**Bulk Operations:**
+- [ ] POST /api/users/bulk (disable)
+- [ ] POST /api/users/bulk (softDelete)
+
+**Cleanup:**
+- [ ] DELETE /api/users/cleanup?daysOld=30
+
+**Edge Cases:**
+- [ ] Create duplicate email (should fail)
+- [ ] Update deleted user (should fail)
+- [ ] Update disabled user (should fail)
+- [ ] Get non-existent user (404)
+- [ ] Invalid email format (400)

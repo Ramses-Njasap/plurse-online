@@ -66,7 +66,7 @@ export const PLATFORMS: Platform[] = [
       {
         label:    "Windows Installer (.exe)",
         filename: "Plurse-Setup-1.0.0.exe",
-        url:      "/downloads/fake/Plurse-Setup-1.0.0.exe",   // replace with real URL
+        url:      "/downloads/fake/Plurse-Setup-1.0.0.exe",
         size:     "84 MB",
         arch:     "x64 / ARM64",
       },
