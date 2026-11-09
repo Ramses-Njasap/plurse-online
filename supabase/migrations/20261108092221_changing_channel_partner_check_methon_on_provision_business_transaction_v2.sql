@@ -1,6 +1,3 @@
--- 2026-08-05 09:14:37 UTC
--- provides a business transaction provisioning function with enhanced idempotency, retry tracking, and conflict resolution for user profile merging.
-
 CREATE OR REPLACE FUNCTION public.provision_business_transaction_v2(
     p_email TEXT,
     p_phone TEXT,
@@ -17,10 +14,12 @@ CREATE OR REPLACE FUNCTION public.provision_business_transaction_v2(
     p_deduct_trial_fee BOOLEAN,
     p_calculated_expiration TIMESTAMPTZ,
     p_operator_user_id UUID,
-    p_is_self_owned BOOLEAN
+    p_is_self_owned BOOLEAN,
+    p_is_payment_completed BOOLEAN,
+    p_target_entity TEXT DEFAULT 'access_keys'
 )
 RETURNS JSONB
-LANGUAGE plpgsql
+LANGUAGE plpgsql 
 SECURITY DEFINER 
 AS $$
 DECLARE
@@ -28,11 +27,14 @@ DECLARE
     v_business_user_id UUID;
     v_business_profile_id UUID;
     v_access_key_id UUID;
+    v_transaction_id UUID;
     v_existing_key_id UUID;
     v_existing_business_id UUID;
+    v_existing_tx_id UUID;
     v_runtime_date TIMESTAMPTZ := clock_timestamp();
     v_gateway_tx_id TEXT;
     v_payload JSONB;
+    v_is_partner BOOLEAN;
 BEGIN
     -- Synthesize a fallback gateway/client transaction ID for idempotency tracking
     v_gateway_tx_id := 'PROV_BIZ_' || md5(p_key_code || '_' || p_operator_user_id::text);
@@ -45,20 +47,26 @@ BEGIN
         'amount', p_amount,
         'is_self_owned', p_is_self_owned,
         'operator_id', p_operator_user_id,
-        'business_name', p_business_name
+        'business_name', p_business_name,
+        'target_entity', p_target_entity
     );
 
     -- ── 1. IDEMPOTENCY CHECK ──
-    -- Check if an access key with this key_code already exists
     SELECT id INTO v_existing_key_id 
     FROM public.access_keys 
     WHERE key_code = p_key_code;
 
     IF v_existing_key_id IS NOT NULL THEN
-        -- Key already created; resolve the associated business ID if present
         SELECT id INTO v_existing_business_id 
         FROM public.businesses 
         WHERE access_key_id = v_existing_key_id;
+
+        -- Fetch existing transaction ID if present
+        SELECT id INTO v_existing_tx_id
+        FROM public.transactions
+        WHERE business_id = v_existing_business_id
+        ORDER BY created_on DESC
+        LIMIT 1;
 
         DELETE FROM public.unresolved_payment_ledger WHERE gateway_tx_id = v_gateway_tx_id;
 
@@ -67,6 +75,7 @@ BEGIN
             'business_id', v_existing_business_id,
             'business_user_id', CASE WHEN p_is_self_owned THEN p_operator_user_id ELSE NULL END,
             'access_key_id', v_existing_key_id,
+            'transaction_id', v_existing_tx_id,
             'is_duplicate', TRUE,
             'created_on', to_jsonb(v_runtime_date)
         );
@@ -74,19 +83,22 @@ BEGIN
 
     -- ── 2. IDENTITY RESOLUTION & GUARDS ──
     IF p_is_self_owned THEN
-        -- Self-owned: The manager is the logged-in operator
         v_business_user_id := p_operator_user_id;
     ELSE
-        -- External manager: Operator must be a valid channel partner
+        -- Check the user profile flag instead of table lookup
+        SELECT is_channel_partner INTO v_is_partner
+        FROM public.user_profiles
+        WHERE id = p_operator_user_id;
+
+        IF v_is_partner IS NOT TRUE THEN
+            RAISE EXCEPTION 'Action permitted only for registered channel partners.';
+        END IF;
+
+        -- Fetch the partner record ID for access_keys foreign key
         SELECT id INTO v_partner_id 
         FROM public.channel_partners 
         WHERE user_id = p_operator_user_id;
 
-        IF v_partner_id IS NULL THEN
-            RAISE EXCEPTION 'Action permitted only for registered channel partners.';
-        END IF;
-
-        -- Prevent duplicate email registration for external managers
         IF EXISTS (SELECT 1 FROM public.users WHERE email = LOWER(TRIM(p_email))) THEN
             RAISE EXCEPTION 'The manager email address % is already registered.', p_email;
         END IF;
@@ -118,20 +130,21 @@ BEGIN
     INSERT INTO public.access_keys (
         id, key_code, key_type, amount, deduct_trial_fee, 
         is_active, activated_at, expires_at, channel_partner_id, 
-        from_company, is_standalone, payment_gateway_tx_id
+        from_company, is_standalone, payment_gateway_tx_id, is_payment_completed
     ) VALUES (
         v_access_key_id, 
         p_key_code, 
         p_key_type::key_distribution_type, 
-        p_amount, 
-        p_deduct_trial_fee, 
-        TRUE, 
-        NULL, 
-        p_calculated_expiration, 
-        v_partner_id,           -- NULL if self-owned or non-partner
-        p_is_self_owned,       -- TRUE if self-owned
-        FALSE,                 -- FALSE because it is immediately linked to a business
-        v_gateway_tx_id
+        p_amount,
+        p_deduct_trial_fee,
+        FALSE,  
+        NULL,   
+        NULL,   
+        v_partner_id,           
+        p_is_self_owned,       
+        FALSE,                 
+        v_gateway_tx_id,
+        p_is_payment_completed
     );
 
     -- ── 5. BUSINESS INSTANCE CREATION ──
@@ -144,6 +157,31 @@ BEGIN
         v_access_key_id, v_runtime_date, v_runtime_date
     );
 
+    -- ── 6. RECORD FINANCIAL TRANSACTION ──
+    v_transaction_id := gen_random_uuid();
+
+    INSERT INTO public.transactions (
+        id,
+        business_id,
+        user_id,
+        amount,
+        status, 
+        target_entity,
+        payload,
+        created_on,
+        updated_on
+    ) VALUES (
+        v_transaction_id,
+        v_business_profile_id,
+        v_business_user_id,
+        p_amount,
+        'Pending',
+        p_target_entity::public.payment_target_entity,
+        v_payload,
+        v_runtime_date,
+        v_runtime_date
+    );
+
     -- Clean up any prior failure tracking entry upon success
     DELETE FROM public.unresolved_payment_ledger WHERE gateway_tx_id = v_gateway_tx_id;
 
@@ -152,6 +190,7 @@ BEGIN
         'business_id', v_business_profile_id,
         'business_user_id', v_business_user_id,
         'access_key_id', v_access_key_id,
+        'transaction_id', v_transaction_id,
         'is_duplicate', FALSE,
         'created_on', to_jsonb(v_runtime_date)
     );

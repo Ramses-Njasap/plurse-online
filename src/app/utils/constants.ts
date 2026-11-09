@@ -1,3 +1,5 @@
+// app/utils/constants.ts
+
 export const TRIAL_PERIOD_DAYS = 7;
 
 export const SUPPORT_WHATSAPP_NUMBER = "+237671705816";

@@ -28,6 +28,7 @@ const EXPIRY_BADGE: Record<string, { label: string; bg: string; color: string }>
     expiring_soon: { label: "Expiring soon", bg: "rgba(245,158,11,0.10)", color: "#d97706" },
     expired: { label: "Expired", bg: "rgba(239,68,68,0.10)", color: "#dc2626" },
     never: { label: "Never expires", bg: "rgba(99,102,241,0.10)", color: "#6366f1" },
+    pending_payment: { label: "Pending payment", bg: "rgba(59,130,246,0.10)", color: "#2563eb" },
     inactive: { label: "Inactive", bg: "rgba(100,116,139,0.12)", color: "#64748b" },
 };
 

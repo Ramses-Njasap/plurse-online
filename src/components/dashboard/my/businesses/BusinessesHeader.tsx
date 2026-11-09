@@ -1,3 +1,5 @@
+// src/components/dashboard/my/businesses/BusinessesHeader.tsx
+
 "use client";
 
 import { type BusinessFilters } from "@/app/(dashboard)/dashboard/my/businesses/hooks/useBusinessFilters";

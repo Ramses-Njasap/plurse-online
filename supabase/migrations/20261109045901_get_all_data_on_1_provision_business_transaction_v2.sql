@@ -1,0 +1,255 @@
+CREATE OR REPLACE FUNCTION public.provision_business_transaction_v2(
+    p_email TEXT,
+    p_phone TEXT,
+    p_manager_full_name TEXT,
+    p_manager_dob DATE,
+    p_manager_country TEXT,
+    p_manager_city TEXT,
+    p_business_name TEXT,
+    p_business_country TEXT,
+    p_business_city TEXT,
+    p_key_code TEXT,
+    p_key_type TEXT,
+    p_amount NUMERIC,
+    p_deduct_trial_fee BOOLEAN,
+    p_calculated_expiration TIMESTAMPTZ,
+    p_operator_user_id UUID,
+    p_is_self_owned BOOLEAN,
+    p_is_payment_completed BOOLEAN,
+    p_target_entity TEXT DEFAULT 'access_keys'
+)
+RETURNS JSONB
+LANGUAGE plpgsql 
+SECURITY DEFINER 
+AS $$
+DECLARE
+    v_partner_id UUID := NULL;
+    v_business_user_id UUID;
+    v_business_profile_id UUID;
+    v_access_key_id UUID;
+    v_transaction_id UUID;
+    v_existing_key_id UUID;
+    v_existing_business_id UUID;
+    v_existing_tx_id UUID;
+    v_runtime_date TIMESTAMPTZ := clock_timestamp();
+    v_gateway_tx_id TEXT;
+    v_payload JSONB;
+    v_is_partner BOOLEAN;
+    
+    -- Variables for database-fetched profile and key fields
+    v_db_full_name TEXT;
+    v_db_dob DATE;
+    v_db_country TEXT;
+    v_db_city TEXT;
+    v_db_key_code TEXT;
+    v_db_key_type TEXT;
+BEGIN
+    -- Synthesize a fallback gateway/client transaction ID for idempotency tracking
+    v_gateway_tx_id := 'PROV_BIZ_' || md5(p_key_code || '_' || p_operator_user_id::text);
+
+    -- Build payload snapshot for dead-letter ledger logging in case of failure
+    v_payload := jsonb_build_object(
+        'email', p_email,
+        'key_code', p_key_code,
+        'key_type', p_key_type,
+        'amount', p_amount,
+        'is_self_owned', p_is_self_owned,
+        'operator_id', p_operator_user_id,
+        'business_name', p_business_name,
+        'target_entity', p_target_entity
+    );
+
+    -- ── 1. IDEMPOTENCY CHECK ──
+    SELECT id INTO v_existing_key_id 
+    FROM public.access_keys 
+    WHERE key_code = p_key_code;
+
+    IF v_existing_key_id IS NOT NULL THEN
+        SELECT id, owner_id INTO v_existing_business_id, v_business_user_id
+        FROM public.businesses 
+        WHERE access_key_id = v_existing_key_id;
+
+        -- Fetch existing transaction ID if present
+        SELECT id INTO v_existing_tx_id
+        FROM public.transactions
+        WHERE business_id = v_existing_business_id
+        ORDER BY created_on DESC
+        LIMIT 1;
+
+        DELETE FROM public.unresolved_payment_ledger WHERE gateway_tx_id = v_gateway_tx_id;
+
+        -- Fetch actual persisted values from the database
+        SELECT full_name, date_of_birth, country, region_city 
+        INTO v_db_full_name, v_db_dob, v_db_country, v_db_city
+        FROM public.user_profiles 
+        WHERE id = v_business_user_id;
+
+        SELECT key_code, key_type::TEXT 
+        INTO v_db_key_code, v_db_key_type
+        FROM public.access_keys 
+        WHERE id = v_existing_key_id;
+
+        RETURN jsonb_build_object(
+            'success', TRUE,
+            'business_id', v_existing_business_id,
+            'business_user_id', CASE WHEN p_is_self_owned THEN p_operator_user_id ELSE v_business_user_id END,
+            'access_key_id', v_existing_key_id,
+            'transaction_id', v_existing_tx_id,
+            'is_duplicate', TRUE,
+            'created_on', to_jsonb(v_runtime_date),
+            -- Fetched straight from DB tables
+            'manager_full_name', v_db_full_name,
+            'manager_dob', v_db_dob,
+            'manager_country', v_db_country,
+            'manager_city', v_db_city,
+            'key_code', v_db_key_code,
+            'key_type', v_db_key_type
+        );
+    END IF;
+
+    -- ── 2. IDENTITY RESOLUTION & GUARDS ──
+    IF p_is_self_owned THEN
+        v_business_user_id := p_operator_user_id;
+    ELSE
+        SELECT is_channel_partner INTO v_is_partner
+        FROM public.user_profiles
+        WHERE id = p_operator_user_id;
+
+        IF v_is_partner IS NOT TRUE THEN
+            RAISE EXCEPTION 'Action permitted only for registered channel partners.';
+        END IF;
+
+        SELECT id INTO v_partner_id 
+        FROM public.channel_partners 
+        WHERE user_id = p_operator_user_id;
+
+        IF EXISTS (SELECT 1 FROM public.users WHERE email = LOWER(TRIM(p_email))) THEN
+            RAISE EXCEPTION 'The manager email address % is already registered.', p_email;
+        END IF;
+
+        v_business_user_id := gen_random_uuid();
+
+        INSERT INTO public.users (
+            id, email, phone, is_business, is_individual, is_active, email_verified, phone_verified
+        ) VALUES (
+            v_business_user_id, LOWER(TRIM(p_email)), TRIM(p_phone), TRUE, FALSE, TRUE, FALSE, FALSE
+        );
+
+        INSERT INTO public.user_profiles (
+            id, full_name, date_of_birth, country, region_city, is_channel_partner
+        ) VALUES (
+            v_business_user_id, p_manager_full_name, p_manager_dob, p_manager_country, p_manager_city, FALSE
+        )
+        ON CONFLICT (id) DO UPDATE SET
+            full_name = EXCLUDED.full_name,
+            date_of_birth = EXCLUDED.date_of_birth,
+            country = EXCLUDED.country,
+            region_city = EXCLUDED.region_city;
+    END IF;
+    
+
+    -- ── 3. ACCESS KEY PROVISIONING ──
+    v_access_key_id := gen_random_uuid();
+
+    INSERT INTO public.access_keys (
+        id, key_code, key_type, amount, deduct_trial_fee, 
+        is_active, activated_at, expires_at, channel_partner_id, 
+        from_company, is_standalone, payment_gateway_tx_id, is_payment_completed
+    ) VALUES (
+        v_access_key_id, 
+        p_key_code, 
+        p_key_type::key_distribution_type, 
+        p_amount,
+        p_deduct_trial_fee,
+        FALSE,  
+        NULL,   
+        NULL,   
+        v_partner_id,           
+        p_is_self_owned,       
+        FALSE,                 
+        v_gateway_tx_id,
+        p_is_payment_completed
+    );
+
+    -- ── 4. BUSINESS INSTANCE CREATION ──
+    v_business_profile_id := gen_random_uuid();
+
+    INSERT INTO public.businesses (
+        id, owner_id, name, country, region_city, access_key_id, created_on, updated_on
+    ) VALUES (
+        v_business_profile_id, v_business_user_id, p_business_name, p_business_country, p_business_city, 
+        v_access_key_id, v_runtime_date, v_runtime_date
+    );
+
+    -- ── 5. RECORD FINANCIAL TRANSACTION ──
+    v_transaction_id := gen_random_uuid();
+
+    INSERT INTO public.transactions (
+        id,
+        business_id,
+        user_id,
+        amount,
+        status, 
+        target_entity,
+        payload,
+        created_on,
+        updated_on
+    ) VALUES (
+        v_transaction_id,
+        v_business_profile_id,
+        v_business_user_id,
+        p_amount,
+        'Pending',
+        p_target_entity::public.payment_target_entity,
+        v_payload,
+        v_runtime_date,
+        v_runtime_date
+    );
+
+    DELETE FROM public.unresolved_payment_ledger WHERE gateway_tx_id = v_gateway_tx_id;
+
+    -- Fetch newly inserted/persisted values directly from the database tables
+    SELECT full_name, date_of_birth, country, region_city 
+    INTO v_db_full_name, v_db_dob, v_db_country, v_db_city
+    FROM public.user_profiles 
+    WHERE id = v_business_user_id;
+
+    SELECT key_code, key_type::TEXT 
+    INTO v_db_key_code, v_db_key_type
+    FROM public.access_keys 
+    WHERE id = v_access_key_id;
+
+    RETURN jsonb_build_object(
+        'success', TRUE,
+        'business_id', v_business_profile_id,
+        'business_user_id', v_business_user_id,
+        'access_key_id', v_access_key_id,
+        'transaction_id', v_transaction_id,
+        'is_duplicate', FALSE,
+        'created_on', to_jsonb(v_runtime_date),
+        -- Fetched straight from DB tables
+        'manager_full_name', v_db_full_name,
+        'manager_dob', v_db_dob,
+        'manager_country', v_db_country,
+        'manager_city', v_db_city,
+        'key_code', v_db_key_code,
+        'key_type', v_db_key_type
+    );
+
+EXCEPTION WHEN OTHERS THEN
+    INSERT INTO public.unresolved_payment_ledger (
+        gateway_tx_id, client_tx_id, user_id, flow_type, payload, error_message, retry_count
+    ) VALUES (
+        v_gateway_tx_id, v_gateway_tx_id, p_operator_user_id, 'PROVISION_BUSINESS_TX', v_payload, SQLERRM, 1
+    )
+    ON CONFLICT (gateway_tx_id) DO UPDATE SET
+        retry_count = public.unresolved_payment_ledger.retry_count + 1,
+        error_message = EXCLUDED.error_message,
+        updated_on = clock_timestamp();
+
+    RETURN jsonb_build_object(
+        'success', FALSE,
+        'message', SQLERRM
+    );
+END;
+$$;

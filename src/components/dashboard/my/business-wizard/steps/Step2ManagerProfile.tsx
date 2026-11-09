@@ -1,3 +1,5 @@
+// app/components/dashboard/my/business-wizard/steps/Step2ManagerProfile.tsx
+
 "use client";
 
 import { useState } from "react";

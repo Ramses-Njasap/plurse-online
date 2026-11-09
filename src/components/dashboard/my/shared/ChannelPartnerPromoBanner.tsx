@@ -1,3 +1,5 @@
+// src/components/dashboard/my/shared/ChannelPartnerPromoBanner.tsx
+
 "use client";
 
 import { useState, useEffect } from "react";

@@ -1,3 +1,5 @@
+// app/(dashboard)/dashboard/my/businesses/BusinessesClient.tsx
+
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
@@ -43,9 +45,9 @@ export function BusinessesClient() {
                 setLiveBusinesses(response.data);
             } else {
                 if (response.errorType === "UNAUTHORIZED") {
+                    toast.error(response.message, { title: "You have not been authenticated, please login!" })
                     setAuthError(response.message);
                 } else {
-                    console.error(response.message);
                     toast.error(response.message, { title: "Couldn't load businesses" });
                 }
             }
@@ -298,6 +300,11 @@ export function BusinessesClient() {
         toast.success(`"${business.name}" was added to your businesses.`, { title: "Business created" });
     }
 
+    function handleCloseAddFlow() {
+        setShowAddFlow(false);
+        setLiveBusinesses((prev) => [...prev]); // Trigger re-render to reflect any changes made during the flow
+    }
+
     /* ── Edit stub ── */
     function handleEdit(b: Business) {}
 
@@ -370,7 +377,7 @@ export function BusinessesClient() {
             {showAddFlow && (
                 <AddBusinessFlow
                     onDone={handleAddDone}
-                    onClose={() => setShowAddFlow(false)}
+                    onClose={handleCloseAddFlow}
                 />
             )}
 

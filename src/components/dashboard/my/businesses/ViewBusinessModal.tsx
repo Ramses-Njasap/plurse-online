@@ -1,3 +1,5 @@
+// src/components/dashboard/my/businesses/ViewBusinessModal.tsx
+
 "use client";
 
 import { useState, useEffect } from "react";

@@ -1,3 +1,5 @@
+// app/utils/auth.ts
+
 import { cookies } from "next/headers";
 import { jwtVerify, SignJWT } from "jose";
 

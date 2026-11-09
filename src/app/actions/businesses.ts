@@ -1,3 +1,5 @@
+// app/actions/businesses.ts
+
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
@@ -152,7 +154,7 @@ const supabaseAdmin = createClient(
 );
 
 export type ProvisionBusinessResponse =
-    | { success: true; business: Business; accessKey: AccessKey }
+    | { success: true; business: Business; accessKey: AccessKey; transactionId?: string }
     | { success: false; message: string };
 
 interface ProvisionBusinessPayload {
@@ -177,6 +179,11 @@ interface ProvisionBusinessPayload {
 
     // Self-owned business flag (true = user is creating a business for themselves, false = channel partner creating for another)
     isSelfOwned: boolean;
+    // Payment completion flag (true = payment completed, false = payment pending)
+    isPaymentCompleted?: boolean;
+
+    // Transaction target Entity matching your payment_target_entity enum
+    transactionTarget?: "access_keys" | "businesses" | "channel_partners";
 }
 
 type RawBusinessRow = Omit<Business, 'manager_user' | 'manager_profile' | 'access_key' | 'channel_partners'>;
@@ -297,6 +304,8 @@ export async function provisionPendingBusinessActionV2(payload: ProvisionBusines
         return { success: false, message: "Unauthorized. Channel partner session required." };
     }
 
+    console.log("Provisioning payload received:", payload, "for operator:", operator);
+
     const calculatedExpiration = payload.key_type === "TRIAL"
         ? new Date(Date.now() + TRIAL_PERIOD_DAYS * 24 * 60 * 60 * 1000).toISOString()
         : null;
@@ -317,10 +326,14 @@ export async function provisionPendingBusinessActionV2(payload: ProvisionBusines
             p_key_type: payload.key_type,
             p_amount: payload.amount,
             p_deduct_trial_fee: payload.deduct_trial_fee,
-            p_calculated_expiration: calculatedExpiration,
+            p_calculated_expiration: null,
             p_operator_user_id: operator.id,
-            p_is_self_owned: payload.isSelfOwned
+            p_is_self_owned: payload.isSelfOwned,
+            p_is_payment_completed: payload.isPaymentCompleted ?? false,
+            p_target_entity: payload.transactionTarget || "access_keys" // Default fallback matching your enum
         });
+
+        console.log("Provisioning RPC returned data:", data, "and error:", error);
 
         if (error) throw error;
         if (!data || data.success === false) {
@@ -356,10 +369,10 @@ export async function provisionPendingBusinessActionV2(payload: ProvisionBusines
             manager_profile: {
                 id: data.business_user_id,
                 user_id: data.business_user_id,
-                full_name: payload.managerFullName,
-                date_of_birth: payload.managerDob,
-                country: payload.managerCountry,
-                region_city: payload.managerCity,
+                full_name: data.manager_full_name,
+                date_of_birth: data.manager_dob,
+                country: data.manager_country,
+                region_city: data.manager_city,
                 is_channel_partner: payload.isSelfOwned,
                 created_on: runtimeDate,
                 updated_on: runtimeDate
@@ -368,9 +381,9 @@ export async function provisionPendingBusinessActionV2(payload: ProvisionBusines
                 id: data.access_key_id,
                 key_code: payload.key_code,
                 key_type: payload.key_type,
-                is_active: false,
-                activated_at: null,
-                expires_at: calculatedExpiration,
+                is_active: false,  // Will be activated upon successful payment confirmation
+                activated_at: null,  // Will be set upon first usage
+                expires_at: null, // Will be set upon first usage
                 amount: payload.amount,
                 deduct_trial_fee: payload.deduct_trial_fee,
                 created_on: runtimeDate,
@@ -382,16 +395,18 @@ export async function provisionPendingBusinessActionV2(payload: ProvisionBusines
             id: data.access_key_id,
             key_code: payload.key_code,
             key_type: payload.key_type,
-            is_active: false,
-            activated_at: null,
-            expires_at: runtimeDate,
+            is_active: false,  // Will be activated upon successful payment confirmation
+            activated_at: null,  // Will be set upon first usage
+            expires_at: null,  // Will be set upon first usage
             amount: payload.amount,
             deduct_trial_fee: payload.deduct_trial_fee,
             created_on: runtimeDate,
-            business: returnBusiness,
+            business: returnBusiness
         };
 
-        return { success: true, business: returnBusiness, accessKey: returnKey };
+        console.log("Provisioning successful. Returning business and access key:", returnBusiness, returnKey, "with transaction ID:", data.transaction_id);
+    
+        return { success: true, business: returnBusiness, accessKey: returnKey, transactionId: data.transaction_id };
 
     } catch (err: any) {
         console.error("Critical error inside transactional business orchestration:", err);
@@ -399,11 +414,130 @@ export async function provisionPendingBusinessActionV2(payload: ProvisionBusines
     }
 }
 
+export async function finalizeBusinessProvisioningActionOnFailure(
+    transactionId: string,
+    errorMessage: string = "Unknown error during provisioning.",
+    maxRetries = 3
+): Promise<{ success: boolean; message?: string }> {
+    let attempt = 0;
+    let delay = 1000; // Start with 1 second delay
+
+    console.log("finalize Business Provisioning Action On Failure called with transactionId:", transactionId);
+
+    while (attempt < maxRetries) {
+        attempt++;
+        try {
+            if (transactionId) {
+                const { error: txError } = await supabaseAdmin
+                    .from("transactions")
+                    .update({
+                        status: 'Failed',
+                        error_message: errorMessage,
+                        updated_on: new Date().toISOString()
+                    })
+                    .eq("id", transactionId);
+
+                if (txError) throw txError;
+            }
+
+            return { success: true };
+        } catch (error: any) {
+            console.warn(`Attempt ${attempt} of ${maxRetries} failed to finalize provisioning:`, error.message || error);
+
+            if (attempt >= maxRetries) {
+                console.error("Critical: All retry attempts failed for successful payment finalization. Manual reconciliation may be required for transaction:", transactionId);
+                return {
+                    success: false,
+                    message: error.message || "Payment was successful, but system failed to update records after multiple attempts."
+                };
+            }
+
+            // Wait before trying again (exponential backoff: 1s, 2s, 4s...)
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            delay *= 2;
+        }
+    }
+
+    return { success: false, message: "Unexpected error during finalization retries." };
+}
+
+export async function finalizeBusinessProvisioningActionOnSuccess(
+    keyId: string,
+    transactionId: string,
+    maxRetries = 3
+): Promise<{ success: boolean; message?: string }> {
+    let attempt = 0;
+    let delay = 1000; // Start with 1 second delay
+
+    console.log("finalize Business Provisioning Action On Success called with keyId:", keyId, "and transactionId:", transactionId);
+
+    while (attempt < maxRetries) {
+        attempt++;
+        try {
+            // 1. Update access key payment completion status & activate it
+            const { error: keyError } = await supabaseAdmin
+                .from("access_keys")
+                .update({
+                    is_payment_completed: true,
+                    is_active: true,
+                    activated_at: new Date().toISOString()
+                })
+                .eq("id", keyId);
+
+            if (keyError) throw keyError;
+
+            // 2. Update the transaction status to 'Success'
+            if (transactionId) {
+                const { error: txError } = await supabaseAdmin
+                    .from("transactions")
+                    .update({
+                        status: 'Success',
+                        updated_on: new Date().toISOString()
+                    })
+                    .eq("id", transactionId);
+
+                if (txError) throw txError;
+            }
+
+            // If both updates succeed, return success immediately
+            return { success: true };
+
+        } catch (error: any) {
+            console.warn(`Attempt ${attempt} of ${maxRetries} failed to finalize provisioning:`, error.message || error);
+
+            if (attempt >= maxRetries) {
+                console.error("Critical: All retry attempts failed for successful payment finalization. Manual reconciliation may be required for key:", keyId, "and transaction:", transactionId);
+                return {
+                    success: false,
+                    message: error.message || "Payment was successful, but system failed to update records after multiple attempts."
+                };
+            }
+
+            // Wait before trying again (exponential backoff: 1s, 2s, 4s...)
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            delay *= 2;
+        }
+    }
+
+    return { success: false, message: "Unexpected error during finalization retries." };
+}
+
 /** Called when the Payment modal fires its callback or webhook verifies completion */
 export async function activateAccessKeyAction(keyId: string): Promise<{ success: boolean; message?: string }> {
     const { error } = await supabaseAdmin
         .from("access_keys")
-        .update({ is_active: true, activated_at: new Date().toISOString() })
+        .update({ is_active: true })
+        .eq("id", keyId);
+
+    if (error) return { success: false, message: error.message };
+    return { success: true };
+}
+
+
+export async function updateAccessKeyPaymentStatus(keyId: string, isPaymentCompleted: boolean): Promise<{ success: boolean; message?: string }> {
+    const { error } = await supabaseAdmin
+        .from("access_keys")
+        .update({ is_active: true, is_payment_completed: isPaymentCompleted })
         .eq("id", keyId);
 
     if (error) return { success: false, message: error.message };
@@ -591,4 +725,94 @@ export async function deleteOrUnlinkBusinessesBulkAction(ids: string[]): Promise
         results.push(result);
     }
     return results;
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   UPDATE BUSINESS DETAILS (Settings → Businesses)
+   Only name, country and region_city are editable, and only by the owner.
+   Everything else (id, business_code, owner_id, access key, partner, dates) is system-managed.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+export interface UpdateBusinessPatch {
+    name: string;
+    country: string;
+    region_city: string;
+}
+
+export type UpdateBusinessResult =
+    | { success: true; message: string; saved: UpdateBusinessPatch; updated_on: string }
+    | { success: false; message: string };
+
+/** Trim and collapse repeated whitespace. */
+function cleanText(value: unknown): string {
+    return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+}
+
+export async function updateBusinessAction(
+    businessId: string,
+    patch: UpdateBusinessPatch
+): Promise<UpdateBusinessResult> {
+    const currentUser = await whichUser.info;
+    if (!currentUser) {
+        return { success: false, message: "Your session has expired. Please log in again." };
+    }
+
+    if (!businessId) {
+        return { success: false, message: "Missing business reference." };
+    }
+
+    // Server-side validation (mirrors the client form, never trust the client alone)
+    const name = cleanText(patch?.name);
+    const country = cleanText(patch?.country);
+    const region_city = cleanText(patch?.region_city);
+
+    if (name.length < 2 || name.length > 80) {
+        return { success: false, message: "The business name must be between 2 and 80 characters." };
+    }
+    if (country.length < 2 || country.length > 60) {
+        return { success: false, message: "Enter a valid country." };
+    }
+    if (region_city.length < 2 || region_city.length > 60) {
+        return { success: false, message: "Enter a valid region or city." };
+    }
+
+    try {
+        const { data: existing, error: fetchError } = await supabaseAdmin
+            .from("businesses")
+            .select("id, owner_id")
+            .eq("id", businessId)
+            .maybeSingle();
+
+        if (fetchError) throw fetchError;
+
+        if (!existing) {
+            return { success: false, message: "This business no longer exists." };
+        }
+
+        if (existing.owner_id !== currentUser.id) {
+            return { success: false, message: "Only the owner of this business can edit its details." };
+        }
+
+        // updated_on is refreshed by the update_businesses_modtime trigger
+        const { data: updated, error: updateError } = await supabaseAdmin
+            .from("businesses")
+            .update({ name, country, region_city })
+            .eq("id", businessId)
+            .eq("owner_id", currentUser.id)
+            .select("updated_on")
+            .single();
+
+        if (updateError) throw updateError;
+
+        return {
+            success: true,
+            message: "Business details updated.",
+            saved: { name, country, region_city },
+            updated_on: updated.updated_on,
+        };
+    } catch (err: any) {
+        console.error(`Error updating business ${businessId}:`, err);
+        return { success: false, message: err.message || "An unexpected error occurred while saving." };
+    }
 }

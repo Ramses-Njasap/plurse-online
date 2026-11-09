@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient as createAdminClient } from "@supabase/supabase-js";
-import { createClient as createActionClient } from "@/lib/supabase/server"; // ✅ Import your SSR client
+import { createClient as createActionClient } from "@/lib/supabase/server";
 import { createPersistentSession } from "@/app/utils/auth";
 
 // Keep this ONLY for admin-level database operations (bypassing RLS during auto-heal)

@@ -42,6 +42,7 @@ export interface AccessKey {
     from_company?: boolean;
     business?: Business | null;
     is_expired?: boolean; // true if the key has expired based on the expires_at timestamp
+    is_payment_completed?: boolean; // true if the payment for this key has been completed
 }
 
 export interface ChannelPartner {
@@ -74,3 +75,29 @@ export interface Business {
     business_code?: string;
 }
 
+
+export type PaymentStatus = "Failed" | "Pending" | "Success";
+export type PaymentTargetEntity = "access_keys" | "businesses" | "channel_partners";
+
+export interface Transaction {
+    id: string;
+    user_id: string | null;
+    business_id: string | null;
+    amount: number;
+    status: PaymentStatus;
+    target_entity: PaymentTargetEntity;
+    payload: Record<string, unknown> | null;
+    error_message: string | null;
+    retry_count: number;
+    created_on: string;
+    updated_on: string;
+    /* joined relation (select("*, business:businesses(id, name)")) */
+    business?: { id: string; name: string } | null;
+}
+
+export interface TransactionStats {
+    totalPaid: number;
+    successCount: number;
+    pendingCount: number;
+    failedCount: number;
+}

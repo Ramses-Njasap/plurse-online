@@ -21,9 +21,10 @@ function daysBack(days: number): string {
 
 /* ── Expiry / status helpers ── */
 
-export type ExpiryStatus = "active" | "expiring_soon" | "expired" | "never" | "inactive";
+export type ExpiryStatus = "active" | "expiring_soon" | "expired" | "never" | "inactive" | "pending_payment";
 
 export function getExpiryStatus(key: AccessKey): ExpiryStatus {
+    if(!key.is_payment_completed) return "pending_payment";
     if (!key.is_active) return "inactive";
     if (key.key_type === "LIFETIME" || !key.expires_at) return "never";
     const now = new Date();

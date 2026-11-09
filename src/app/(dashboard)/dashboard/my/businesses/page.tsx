@@ -1,3 +1,5 @@
+// app/(dashboard)/dashboard/my/businesses/page.tsx
+
 export const metadata = {
     title: "Businesses",
     description: "Businesses that are affiliated to your account.",

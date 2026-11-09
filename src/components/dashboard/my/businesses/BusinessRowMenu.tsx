@@ -1,3 +1,5 @@
+// src/components/dashboard/my/businesses/BusinessRowMenu.tsx
+
 "use client";
 
 import { useState, useRef, useEffect } from "react";

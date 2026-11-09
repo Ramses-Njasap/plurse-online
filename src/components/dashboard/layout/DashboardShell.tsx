@@ -19,22 +19,24 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     }, [mobileNavOpen]);
 
     return (
-        <div className="flex h-screen overflow-hidden bg-[#FAFAF9]">
-            <DashboardSidebar open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
-            <GridBackground />
+        <>
+            <ToastProvider>
+                <div className="flex h-screen overflow-hidden bg-[#FAFAF9]">
+                    <DashboardSidebar open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
+                    <GridBackground />
 
-            <div className="flex flex-1 z-10 flex-col overflow-hidden">
-                <DashboardTopbar
-                    mobileNavOpen={mobileNavOpen}
-                    onMenuClick={() => setMobileNavOpen((prev) => !prev)}
-                />
+                    <div className="flex flex-1 z-10 flex-col overflow-hidden">
+                        <DashboardTopbar
+                            mobileNavOpen={mobileNavOpen}
+                            onMenuClick={() => setMobileNavOpen((prev) => !prev)}
+                        />
 
-                <main className="flex-1 overflow-y-auto p-6 lg:p-8">
-                    <ToastProvider>
-                        {children}
-                    </ToastProvider>
-                </main>
-            </div>
-        </div>
+                        <main className="flex-1 overflow-y-auto p-6 lg:p-8">
+                            {children}
+                        </main>
+                    </div>
+                </div>
+            </ToastProvider>
+        </>
     );
 }

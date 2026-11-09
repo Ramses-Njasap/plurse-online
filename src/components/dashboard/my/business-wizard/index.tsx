@@ -1,3 +1,5 @@
+// app/components/dashboard/my/business-wizard/index.tsx
+
 "use client";
 
 /* ─────────────────────────────────────────────────────────────────

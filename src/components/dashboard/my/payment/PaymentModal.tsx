@@ -4,66 +4,25 @@ import { useState } from "react";
 import { formatAmount } from "@/app/(dashboard)/dashboard/my/keys/data/mockKeys";
 import type { KeyType } from "@/types/users.types";
 import { ModalShell, Field, Spinner } from "../keys/new-key-modal/ModalPrimitives";
+import { useToast } from "@/components/ui";
+import { error } from "console";
 
 /* ─────────────────────────────────────────────────────────────────
-   Mock payment processors
-   TODO: replace each with a real provider SDK call
+   Types
    ───────────────────────────────────────────────────────────────── */
-
-async function mockMobileMoneyPayment(payload: {
-    provider: "mtn" | "orange";
-    phone: string;
-    amount: number;
-}): Promise<{ transaction_id: string }> {
-    await new Promise((r) => setTimeout(r, 900));  // OTP push delay
-    await new Promise((r) => setTimeout(r, 1600)); // confirmation wait
-    // Phone ending in 0000 always fails for testing
-    if (payload.phone.replace(/\s/g, "").endsWith("0000")) {
-        throw new Error(`${payload.provider === "mtn" ? "MTN MoMo" : "Orange Money"} payment was declined.`);
-    }
-    return { transaction_id: `TXN-MM-${Date.now().toString(36).toUpperCase()}` };
-}
-
-async function mockCardPayment(payload: {
-    amount: number;
-    card_number: string;
-    expiry: string;
-    cvv: string;
-}): Promise<{ transaction_id: string }> {
-    await new Promise((r) => setTimeout(r, 800));
-    await new Promise((r) => setTimeout(r, 1400));
-    if (payload.card_number.endsWith("0000")) {
-        throw new Error("Card declined. Please try a different payment method.");
-    }
-    return { transaction_id: `TXN-CD-${Date.now().toString(36).toUpperCase()}` };
-}
-
-/* ── Types ── */
 
 type PaymentMethod = "mobile_money" | "card";
 type MoMoProvider = "mtn" | "orange";
 type PaymentStatus = "idle" | "processing" | "success" | "failed";
 
-/**
- * Everything in here is optional. Skip `context` entirely and the modal behaves
- * exactly like the original key-purchase flow — this is just the escape hatch
- * for reusing the same modal (and the same payment logic) for a different
- * purchase, like unlocking channel-partner status, a subscription renewal, etc.
- */
 export interface PaymentModalContext {
-    /** Header title per status. Falls back to the key-purchase defaults. */
     titles?: Partial<Record<PaymentStatus, string>>;
-    /** Subtitle per status. Falls back to the key-purchase defaults. */
     subtitles?: Partial<Record<PaymentStatus, string>>;
-    /** Customizes the blue "amount due" banner at the top of the idle form. */
     amountBanner?: {
-        /** Small label above the amount. Default: "Amount due". */
         label?: string;
-        /** Pill badge text. Default: `${keyType} key` when a keyType is passed, otherwise hidden. */
         badgeText?: string;
         badgeColor?: string;
         badgeBg?: string;
-        /** Optional callout box under the banner — e.g. subscription details. */
         detailBox?: {
             lines: string[];
             color?: string;
@@ -71,27 +30,23 @@ export interface PaymentModalContext {
             borderColor?: string;
         };
     };
-    /** Line shown on the success screen while it redirects. */
     successMessage?: string;
-    /** Hint text above the Pay button. Pass "" to hide it entirely. */
     testHint?: string;
 }
 
 interface PaymentModalProps {
     amount: number;
-    /** Optional — only used to derive the default badge/copy. Omit for non-key purchases. */
     keyType?: KeyType;
     onSuccess: (transactionId: string) => void;
     onBeforePay: () => Promise<boolean>;
     isPreparing?: boolean;
     preflightError?: string;
     onClose: () => void;
-    /** Swap in different copy/labels for a different purchase without touching the payment logic. */
     context?: PaymentModalContext;
 }
 
 /* ─────────────────────────────────────────────────────────────────
-   Root modal — owns method selection + status transitions
+   Root modal
    ───────────────────────────────────────────────────────────────── */
 
 export function PaymentModal({
@@ -108,6 +63,8 @@ export function PaymentModal({
     const [status, setStatus] = useState<PaymentStatus>("idle");
     const [errorMsg, setErrorMsg] = useState("");
     const [txnId, setTxnId] = useState("");
+
+    const toast = useToast();
 
     // Mobile money state
     const [provider, setProvider] = useState<MoMoProvider>("mtn");
@@ -127,33 +84,98 @@ export function PaymentModal({
         cvv.length >= 3;
     const canPay = method === "mobile_money" ? canPayMomo : canPayCard;
 
+    // ──────────────────────────────────────────────────────────────
+    // Polling helper (Fapshi statuses)
+    // ──────────────────────────────────────────────────────────────
+    async function pollPaymentStatus(transId: string, maxAttempts = 24) {
+        for (let i = 0; i < maxAttempts; i++) {
+            await new Promise((r) => setTimeout(r, 20000)); // every 5 s
+
+            try {
+                const res = await fetch(`/api/pay/status?ref=${encodeURIComponent(transId)}`);
+                const data = await res.json();
+                console.log("Payment status poll:", data);
+
+                if (data.status === "SUCCESSFUL") {
+                    return true;
+                }
+                if (data.status === "FAILED" || data.status === "EXPIRED") {
+                    toast.error(data.message || "Payment was declined or expired.");
+                    return false;
+                }
+                // CREATED / PENDING → keep waiting
+            } catch (err) {
+                // network error – continue polling
+                console.warn("Status poll error:", err);
+                toast.warning("Network error while checking payment status. Retrying...");
+            }
+        }
+        toast.dismiss("Payment timed out. Please check your phone or try again.");
+        return false;
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Main pay handler
+    // ──────────────────────────────────────────────────────────────
     async function handlePay() {
         if (!canPay) return;
         setStatus("processing");
         setErrorMsg("");
 
         try {
-            // 1. Fire our pre-flight DB entry hook right away
+            // 1. Pre-flight DB check
             const isReady = await onBeforePay();
             if (!isReady) {
                 setStatus("failed");
-                setErrorMsg(preflightError || "Database sync failed before transaction could initiate.");
+                setErrorMsg(
+                    preflightError || "Database sync failed before transaction could initiate."
+                );
                 return;
             }
 
-            // 2. Fall directly through into your MoMo prompt push logic
-            let result;
             if (method === "mobile_money") {
-                result = await mockMobileMoneyPayment({ provider, phone, amount });
-            } else {
-                result = await mockCardPayment({ amount, card_number: cardNumber.replace(/\s/g, ""), expiry, cvv });
-            }
+                // 2. Call your backend (Fapshi Direct Pay)
+                const res = await fetch("/api/pay", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        amount,
+                        phone: phone.replace(/\s/g, ""),
+                        provider, // "mtn" | "orange"
+                        email: "ramsesnjasap11@gmail.com", // replace with real user data if available
+                        name: "Valued Customer",
+                    }),
+                });
 
-            setTxnId(result.transaction_id);
-            setStatus("success");
-            setTimeout(() => onSuccess(result.transaction_id), 1200);
+                const data = await res.json();
+
+
+                if (!res.ok) {
+                    toast.error(data.error || "Payment initiation failed.");
+                    return false;
+                }
+
+                // Store references
+                setTxnId(data.transaction_reference || data.fapshi_trans_id);
+
+                // 3. Poll until SUCCESSFUL / FAILED
+                const paymentSuccess = await pollPaymentStatus(data.fapshi_trans_id);
+
+                if (!paymentSuccess) {
+                    console.warn("Payment failed or timed out for transaction:", data.fapshi_trans_id);
+                    return false;
+                }
+
+                setStatus("success");
+                setTimeout(() => onSuccess(data.transaction_reference || data.fapshi_trans_id), 1200);
+            } else {
+                toast.error("Card payments are not yet available. Please use Mobile Money.");
+                return false;
+            }
         } catch (err) {
-            setErrorMsg(err instanceof Error ? err.message : "Payment failed.");
+            const message = err instanceof Error ? err.message : "Payment failed.";
+            setErrorMsg(message);
+            toast.error(message);
             setStatus("failed");
         }
     }
@@ -164,12 +186,14 @@ export function PaymentModal({
         setCvv("");
     }
 
-    /* ── Defaults — identical to the original key-purchase copy ── */
+    /* ── Defaults ── */
     const defaultIdleSubtitle = keyType
         ? `Pay ${formatAmount(amount)} to create your ${keyType} key.`
         : `Pay ${formatAmount(amount)} to continue.`;
 
-    const defaultSuccessMessage = keyType ? "Proceeding to key creation…" : "Proceeding…";
+    const defaultSuccessMessage = keyType
+        ? "Proceeding to key creation…"
+        : "Proceeding…";
 
     const titleMap: Record<PaymentStatus, string> = {
         idle: context?.titles?.idle ?? "Complete payment",
@@ -180,12 +204,17 @@ export function PaymentModal({
 
     const subtitleMap: Record<PaymentStatus, string> = {
         idle: context?.subtitles?.idle ?? defaultIdleSubtitle,
-        processing: context?.subtitles?.processing ?? "Please wait. Do not close this window.",
-        success: context?.subtitles?.success ?? "Your payment was confirmed. Proceeding…",
-        failed: context?.subtitles?.failed ?? "Something went wrong. You can try again below.",
+        processing:
+            context?.subtitles?.processing ?? "Please wait. Do not close this window.",
+        success:
+            context?.subtitles?.success ?? "Your payment was confirmed. Proceeding…",
+        failed:
+            context?.subtitles?.failed ?? "Something went wrong. You can try again below.",
     };
 
-    const testHint = context?.testHint ?? "Test: use any number — end in 0000 to simulate failure.";
+    const testHint =
+        context?.testHint ??
+        "Test: use any number — end in 0000 to simulate failure.";
     const successMessage = context?.successMessage ?? defaultSuccessMessage;
 
     return (
@@ -195,13 +224,11 @@ export function PaymentModal({
             onClose={status === "processing" ? () => { } : onClose}
             width="480px"
         >
-            {/* ── Idle: payment form ── */}
+            {/* ── Idle ── */}
             {status === "idle" && (
                 <div className="space-y-5">
-                    {/* Amount banner */}
                     <AmountBanner amount={amount} keyType={keyType} banner={context?.amountBanner} />
 
-                    {/* Method tabs */}
                     <div
                         className="flex gap-1 rounded-xl p-1"
                         style={{ background: "var(--surface-muted)", border: "1px solid var(--border)" }}
@@ -220,7 +247,6 @@ export function PaymentModal({
                         />
                     </div>
 
-                    {/* Mobile money form */}
                     {method === "mobile_money" && (
                         <MoMoForm
                             provider={provider}
@@ -231,7 +257,6 @@ export function PaymentModal({
                         />
                     )}
 
-                    {/* Card form */}
                     {method === "card" && (
                         <CardForm
                             cardName={cardName}
@@ -245,14 +270,12 @@ export function PaymentModal({
                         />
                     )}
 
-                    {/* Test hint */}
                     {testHint && (
                         <p className="text-center text-[11px]" style={{ color: "var(--text-subtle)" }}>
                             {testHint}
                         </p>
                     )}
 
-                    {/* CTA */}
                     <div className="space-y-2">
                         <button
                             type="button"
@@ -260,8 +283,12 @@ export function PaymentModal({
                             onClick={handlePay}
                             className="h-[44px] w-full rounded-xl text-[14px] font-semibold text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                             style={{ background: "var(--brand)" }}
-                            onMouseEnter={(e) => { if (canPay) e.currentTarget.style.background = "var(--brand-hover)"; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = "var(--brand)"; }}
+                            onMouseEnter={(e) => {
+                                if (canPay) e.currentTarget.style.background = "var(--brand-hover)";
+                            }}
+                            onMouseLeave={(e) => {
+                                e.currentTarget.style.background = "var(--brand)";
+                            }}
                         >
                             Pay {formatAmount(amount)}
                         </button>
@@ -269,8 +296,14 @@ export function PaymentModal({
                             type="button"
                             onClick={onClose}
                             className="h-[40px] w-full rounded-xl border text-[13px] font-medium transition-all"
-                            style={{ borderColor: "var(--border)", color: "var(--text-muted)", background: "white" }}
-                            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-muted)")}
+                            style={{
+                                borderColor: "var(--border)",
+                                color: "var(--text-muted)",
+                                background: "white",
+                            }}
+                            onMouseEnter={(e) =>
+                                (e.currentTarget.style.background = "var(--surface-muted)")
+                            }
                             onMouseLeave={(e) => (e.currentTarget.style.background = "white")}
                         >
                             Cancel
@@ -298,7 +331,7 @@ export function PaymentModal({
 }
 
 /* ─────────────────────────────────────────────────────────────────
-   Sub-components
+   Sub-components (unchanged from your original)
    ───────────────────────────────────────────────────────────────── */
 
 function AmountBanner({
@@ -312,17 +345,26 @@ function AmountBanner({
 }) {
     const label = banner?.label ?? "Amount due";
     const badgeText = banner?.badgeText ?? (keyType ? `${keyType} key` : undefined);
-    const badgeBg = banner?.badgeBg ?? (keyType === "TRIAL" ? "rgba(245,158,11,0.12)" : "rgba(59,130,246,0.12)");
-    const badgeColor = banner?.badgeColor ?? (keyType === "TRIAL" ? "#d97706" : "var(--brand)");
+    const badgeBg =
+        banner?.badgeBg ??
+        (keyType === "TRIAL" ? "rgba(245,158,11,0.12)" : "rgba(59,130,246,0.12)");
+    const badgeColor =
+        banner?.badgeColor ?? (keyType === "TRIAL" ? "#d97706" : "var(--brand)");
 
     return (
         <div className="space-y-3">
             <div
                 className="flex items-center justify-between rounded-xl px-4 py-3"
-                style={{ background: "var(--brand-light)", border: "1px solid rgba(59,130,246,0.2)" }}
+                style={{
+                    background: "var(--brand-light)",
+                    border: "1px solid rgba(59,130,246,0.2)",
+                }}
             >
                 <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--brand)" }}>
+                    <p
+                        className="text-[11px] font-semibold uppercase tracking-wide"
+                        style={{ color: "var(--brand)" }}
+                    >
                         {label}
                     </p>
                     <p className="text-[24px] font-bold" style={{ color: "var(--foreground)" }}>
@@ -339,7 +381,6 @@ function AmountBanner({
                 )}
             </div>
 
-            {/* Optional callout — e.g. subscription details for a non-key purchase */}
             {banner?.detailBox && (
                 <div
                     className="space-y-1 rounded-xl border px-4 py-3 text-[12px] leading-relaxed"
@@ -359,9 +400,15 @@ function AmountBanner({
 }
 
 function MethodTab({
-    active, icon, label, onClick,
+    active,
+    icon,
+    label,
+    onClick,
 }: {
-    active: boolean; icon: React.ReactNode; label: string; onClick: () => void;
+    active: boolean;
+    icon: React.ReactNode;
+    label: string;
+    onClick: () => void;
 }) {
     return (
         <button
@@ -370,7 +417,11 @@ function MethodTab({
             className="flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5 text-[13px] font-medium transition-all"
             style={
                 active
-                    ? { background: "var(--surface)", color: "var(--foreground)", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }
+                    ? {
+                        background: "var(--surface)",
+                        color: "var(--foreground)",
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+                    }
                     : { background: "transparent", color: "var(--text-muted)" }
             }
         >
@@ -380,16 +431,23 @@ function MethodTab({
     );
 }
 
-/* ── Mobile money form ── */
-
-const MOMO_PROVIDERS: { id: MoMoProvider; label: string; color: string; bg: string; prefix: string }[] = [
-    { id: "mtn", label: "MTN MoMo", color: "#854d0e", bg: "#fef9c3", prefix: "+237 67 / 68" },
-    { id: "orange", label: "Orange Money", color: "#9a3412", bg: "#fff7ed", prefix: "+237 69" },
-];
+const MOMO_PROVIDERS: {
+    id: MoMoProvider;
+    label: string;
+    color: string;
+    bg: string;
+    prefix: string;
+}[] = [
+        { id: "mtn", label: "MTN MoMo", color: "#854d0e", bg: "#fef9c3", prefix: "+237 67 / 68" },
+        { id: "orange", label: "Orange Money", color: "#9a3412", bg: "#fff7ed", prefix: "+237 69" },
+    ];
 
 function MoMoForm({
-    provider, phone, amount,
-    onProviderChange, onPhoneChange,
+    provider,
+    phone,
+    amount,
+    onProviderChange,
+    onPhoneChange,
 }: {
     provider: MoMoProvider;
     phone: string;
@@ -401,7 +459,6 @@ function MoMoForm({
 
     return (
         <div className="space-y-4">
-            {/* Provider selector */}
             <Field label="Mobile money provider">
                 <div className="grid grid-cols-2 gap-2">
                     {MOMO_PROVIDERS.map((p) => (
@@ -420,7 +477,9 @@ function MoMoForm({
                             <div>
                                 <p
                                     className="text-[13px] font-semibold"
-                                    style={{ color: provider === p.id ? "var(--brand)" : "var(--foreground)" }}
+                                    style={{
+                                        color: provider === p.id ? "var(--brand)" : "var(--foreground)",
+                                    }}
                                 >
                                     {p.label}
                                 </p>
@@ -443,13 +502,18 @@ function MoMoForm({
                 </div>
             </Field>
 
-            {/* Phone number */}
-            <Field label={`${active.label} number`} hint="Enter the number registered with your mobile money account.">
+            <Field
+                label={`${active.label} number`}
+                hint="Enter the number registered with your mobile money account."
+            >
                 <div className="flex gap-2">
-                    {/* Country flag / prefix badge */}
                     <div
                         className="flex h-[42px] shrink-0 items-center gap-1.5 rounded-lg border px-3 text-[12px] font-medium"
-                        style={{ borderColor: "var(--border)", background: "var(--surface-muted)", color: "var(--text-muted)" }}
+                        style={{
+                            borderColor: "var(--border)",
+                            background: "var(--surface-muted)",
+                            color: "var(--text-muted)",
+                        }}
                     >
                         🇨🇲 +237
                     </div>
@@ -459,38 +523,51 @@ function MoMoForm({
                         inputMode="numeric"
                         onChange={(e) => {
                             const digits = e.target.value.replace(/\D/g, "").slice(0, 9);
-                            onPhoneChange(digits.replace(/(\d{2})(\d{3})(\d{0,4})/, (_, a, b, c) =>
-                                c ? `${a} ${b} ${c}` : b ? `${a} ${b}` : a
-                            ));
+                            onPhoneChange(
+                                digits.replace(/(\d{2})(\d{3})(\d{0,4})/, (_, a, b, c) =>
+                                    c ? `${a} ${b} ${c}` : b ? `${a} ${b}` : a
+                                )
+                            );
                         }}
                         placeholder="6X XXX XXXX"
                         className="h-[42px] flex-1 rounded-lg border px-3 font-mono text-[14px] tracking-wide focus:outline-none"
-                        style={{ borderColor: "var(--border)", color: "var(--foreground)", background: "white" }}
+                        style={{
+                            borderColor: "var(--border)",
+                            color: "var(--foreground)",
+                            background: "white",
+                        }}
                         onFocus={(e) => (e.currentTarget.style.borderColor = "var(--brand)")}
                         onBlur={(e) => (e.currentTarget.style.borderColor = "var(--border)")}
                     />
                 </div>
             </Field>
 
-            {/* What will happen */}
             <div
                 className="rounded-xl px-4 py-3 text-[12px] leading-relaxed"
                 style={{ background: active.bg, color: active.color }}
             >
-                A payment request of <strong>{formatAmount(amount)}</strong> will be sent to your{" "}
-                <strong>{active.label}</strong> number. Approve it on your phone to complete the payment.
+                A payment request of <strong>{formatAmount(amount)}</strong> will be sent to
+                your <strong>{active.label}</strong> number. Approve it on your phone to
+                complete the payment.
             </div>
         </div>
     );
 }
 
-/* ── Card form ── */
-
 function CardForm({
-    cardName, cardNumber, expiry, cvv,
-    onCardNameChange, onCardNumberChange, onExpiryChange, onCvvChange,
+    cardName,
+    cardNumber,
+    expiry,
+    cvv,
+    onCardNameChange,
+    onCardNumberChange,
+    onExpiryChange,
+    onCvvChange,
 }: {
-    cardName: string; cardNumber: string; expiry: string; cvv: string;
+    cardName: string;
+    cardNumber: string;
+    expiry: string;
+    cvv: string;
     onCardNameChange: (v: string) => void;
     onCardNumberChange: (v: string) => void;
     onExpiryChange: (v: string) => void;
@@ -505,7 +582,11 @@ function CardForm({
                     onChange={(e) => onCardNameChange(e.target.value)}
                     placeholder="e.g. AMARA NKOSI"
                     className="h-[42px] w-full rounded-lg border px-3 text-[13px] uppercase tracking-wide focus:outline-none"
-                    style={{ borderColor: "var(--border)", color: "var(--foreground)", background: "white" }}
+                    style={{
+                        borderColor: "var(--border)",
+                        color: "var(--foreground)",
+                        background: "white",
+                    }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = "var(--brand)")}
                     onBlur={(e) => (e.currentTarget.style.borderColor = "var(--border)")}
                 />
@@ -524,11 +605,18 @@ function CardForm({
                         }}
                         placeholder="0000 0000 0000 0000"
                         className="h-[42px] w-full rounded-lg border px-3 pr-10 font-mono text-[14px] tracking-widest focus:outline-none"
-                        style={{ borderColor: "var(--border)", color: "var(--foreground)", background: "white" }}
+                        style={{
+                            borderColor: "var(--border)",
+                            color: "var(--foreground)",
+                            background: "white",
+                        }}
                         onFocus={(e) => (e.currentTarget.style.borderColor = "var(--brand)")}
                         onBlur={(e) => (e.currentTarget.style.borderColor = "var(--border)")}
                     />
-                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2" style={{ color: "var(--text-subtle)" }}>
+                    <span
+                        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2"
+                        style={{ color: "var(--text-subtle)" }}
+                    >
                         <CardIcon />
                     </span>
                 </div>
@@ -543,11 +631,17 @@ function CardForm({
                         maxLength={5}
                         onChange={(e) => {
                             const digits = e.target.value.replace(/\D/g, "").slice(0, 4);
-                            onExpiryChange(digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits);
+                            onExpiryChange(
+                                digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits
+                            );
                         }}
                         placeholder="MM/YY"
                         className="h-[42px] w-full rounded-lg border px-3 font-mono text-[14px] focus:outline-none"
-                        style={{ borderColor: "var(--border)", color: "var(--foreground)", background: "white" }}
+                        style={{
+                            borderColor: "var(--border)",
+                            color: "var(--foreground)",
+                            background: "white",
+                        }}
                         onFocus={(e) => (e.currentTarget.style.borderColor = "var(--brand)")}
                         onBlur={(e) => (e.currentTarget.style.borderColor = "var(--border)")}
                     />
@@ -561,7 +655,11 @@ function CardForm({
                         onChange={(e) => onCvvChange(e.target.value.replace(/\D/g, "").slice(0, 4))}
                         placeholder="•••"
                         className="h-[42px] w-full rounded-lg border px-3 font-mono text-[14px] focus:outline-none"
-                        style={{ borderColor: "var(--border)", color: "var(--foreground)", background: "white" }}
+                        style={{
+                            borderColor: "var(--border)",
+                            color: "var(--foreground)",
+                            background: "white",
+                        }}
                         onFocus={(e) => (e.currentTarget.style.borderColor = "var(--brand)")}
                         onBlur={(e) => (e.currentTarget.style.borderColor = "var(--border)")}
                     />
@@ -571,12 +669,21 @@ function CardForm({
     );
 }
 
-/* ── Processing state ── */
-
-function ProcessingState({ method, provider, amount }: { method: PaymentMethod; provider: MoMoProvider; amount: number }) {
-    const label = method === "mobile_money"
-        ? provider === "mtn" ? "MTN MoMo" : "Orange Money"
-        : "card payment";
+function ProcessingState({
+    method,
+    provider,
+    amount,
+}: {
+    method: PaymentMethod;
+    provider: MoMoProvider;
+    amount: number;
+}) {
+    const label =
+        method === "mobile_money"
+            ? provider === "mtn"
+                ? "MTN MoMo"
+                : "Orange Money"
+            : "card payment";
 
     return (
         <div className="flex flex-col items-center gap-6 py-8">
@@ -584,54 +691,73 @@ function ProcessingState({ method, provider, amount }: { method: PaymentMethod; 
                 className="flex h-16 w-16 items-center justify-center rounded-full"
                 style={{ background: "var(--brand-light)" }}
             >
-                {method === "mobile_money"
-                    ? <ProviderLogo provider={provider} size={36} />
-                    : <Spinner size={28} />
-                }
+                {method === "mobile_money" ? (
+                    <ProviderLogo provider={provider} size={36} />
+                ) : (
+                    <Spinner size={28} />
+                )}
             </div>
             <div className="text-center">
                 <p className="text-[15px] font-semibold" style={{ color: "var(--foreground)" }}>
                     {method === "mobile_money"
                         ? "Waiting for your approval…"
-                        : "Processing your card…"
-                    }
+                        : "Processing your card…"}
                 </p>
                 <p className="mt-1 text-[13px]" style={{ color: "var(--text-muted)" }}>
                     {method === "mobile_money"
                         ? `Check your phone and approve the ${formatAmount(amount)} request from ${label}.`
-                        : "Do not close this window. This usually takes a few seconds."
-                    }
+                        : "Do not close this window. This usually takes a few seconds."}
                 </p>
             </div>
-            {/* Animated progress bar */}
-            <div className="h-1 w-full overflow-hidden rounded-full" style={{ background: "var(--surface-muted)" }}>
+            <div
+                className="h-1 w-full overflow-hidden rounded-full"
+                style={{ background: "var(--surface-muted)" }}
+            >
                 <div
                     className="h-full rounded-full"
-                    style={{ background: "var(--brand)", animation: "payment-progress 2.5s ease-in-out forwards" }}
+                    style={{
+                        background: "var(--brand)",
+                        animation: "payment-progress 2.5s ease-in-out forwards",
+                    }}
                 />
             </div>
             <style>{`
-                @keyframes payment-progress {
-                    0%   { width: 0% }
-                    30%  { width: 45% }
-                    65%  { width: 72% }
-                    100% { width: 93% }
-                }
-            `}</style>
+        @keyframes payment-progress {
+          0%   { width: 0% }
+          30%  { width: 45% }
+          65%  { width: 72% }
+          100% { width: 93% }
+        }
+      `}</style>
         </div>
     );
 }
 
-/* ── Success state ── */
-
-function SuccessState({ amount, txnId, message }: { amount: number; txnId: string; message: string }) {
+function SuccessState({
+    amount,
+    txnId,
+    message,
+}: {
+    amount: number;
+    txnId: string;
+    message: string;
+}) {
     return (
         <div className="flex flex-col items-center gap-5 py-8">
             <div
                 className="flex h-16 w-16 items-center justify-center rounded-full"
                 style={{ background: "rgba(34,197,94,0.12)" }}
             >
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <svg
+                    width="32"
+                    height="32"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#22c55e"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                >
                     <path d="M20 6 9 17l-5-5" />
                 </svg>
             </div>
@@ -641,7 +767,9 @@ function SuccessState({ amount, txnId, message }: { amount: number; txnId: strin
                 </p>
                 <p className="mt-1 text-[12px]" style={{ color: "var(--text-muted)" }}>
                     Transaction ID:{" "}
-                    <span className="font-mono" style={{ color: "var(--foreground)" }}>{txnId}</span>
+                    <span className="font-mono" style={{ color: "var(--foreground)" }}>
+                        {txnId}
+                    </span>
                 </p>
                 <p className="mt-3 text-[13px]" style={{ color: "var(--text-muted)" }}>
                     {message}
@@ -651,22 +779,45 @@ function SuccessState({ amount, txnId, message }: { amount: number; txnId: strin
     );
 }
 
-/* ── Failed state ── */
-
-function FailedState({ errorMsg, onRetry, onClose }: { errorMsg: string; onRetry: () => void; onClose: () => void }) {
+function FailedState({
+    errorMsg,
+    onRetry,
+    onClose,
+}: {
+    errorMsg: string;
+    onRetry: () => void;
+    onClose: () => void;
+}) {
     return (
         <div className="flex flex-col items-center gap-5 py-6">
             <div
                 className="flex h-16 w-16 items-center justify-center rounded-full"
                 style={{ background: "rgba(239,68,68,0.10)" }}
             >
-                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" /><path d="m15 9-6 6M9 9l6 6" />
+                <svg
+                    width="30"
+                    height="30"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#ef4444"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                >
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="m15 9-6 6M9 9l6 6" />
                 </svg>
             </div>
             <div className="text-center">
-                <p className="text-[15px] font-semibold" style={{ color: "#dc2626" }}>Payment declined</p>
-                <p className="mt-2 text-[13px] leading-relaxed" style={{ color: "var(--text-muted)" }}>{errorMsg}</p>
+                <p className="text-[15px] font-semibold" style={{ color: "#dc2626" }}>
+                    Payment declined
+                </p>
+                <p
+                    className="mt-2 text-[13px] leading-relaxed"
+                    style={{ color: "var(--text-muted)" }}
+                >
+                    {errorMsg}
+                </p>
             </div>
             <div className="w-full space-y-2">
                 <button
@@ -674,7 +825,9 @@ function FailedState({ errorMsg, onRetry, onClose }: { errorMsg: string; onRetry
                     onClick={onRetry}
                     className="h-[44px] w-full rounded-xl text-[14px] font-semibold text-white transition-all"
                     style={{ background: "var(--brand)" }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--brand-hover)")}
+                    onMouseEnter={(e) =>
+                        (e.currentTarget.style.background = "var(--brand-hover)")
+                    }
                     onMouseLeave={(e) => (e.currentTarget.style.background = "var(--brand)")}
                 >
                     Try again
@@ -683,8 +836,14 @@ function FailedState({ errorMsg, onRetry, onClose }: { errorMsg: string; onRetry
                     type="button"
                     onClick={onClose}
                     className="h-[40px] w-full rounded-xl border text-[13px] font-medium transition-all"
-                    style={{ borderColor: "var(--border)", color: "var(--text-muted)", background: "white" }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-muted)")}
+                    style={{
+                        borderColor: "var(--border)",
+                        color: "var(--text-muted)",
+                        background: "white",
+                    }}
+                    onMouseEnter={(e) =>
+                        (e.currentTarget.style.background = "var(--surface-muted)")
+                    }
                     onMouseLeave={(e) => (e.currentTarget.style.background = "white")}
                 >
                     Cancel
@@ -694,17 +853,27 @@ function FailedState({ errorMsg, onRetry, onClose }: { errorMsg: string; onRetry
     );
 }
 
-/* ─────────────────────────────────────────────────────────────────
-   Provider logo — SVG wordmarks kept minimal
-   ───────────────────────────────────────────────────────────────── */
-
-function ProviderLogo({ provider, size = 28 }: { provider: MoMoProvider; size?: number }) {
+function ProviderLogo({
+    provider,
+    size = 28,
+}: {
+    provider: MoMoProvider;
+    size?: number;
+}) {
     if (provider === "mtn") {
         return (
             <svg width={size} height={size} viewBox="0 0 40 40" fill="none">
                 <circle cx="20" cy="20" r="20" fill="#FFCB00" />
-                <text x="50%" y="55%" dominantBaseline="middle" textAnchor="middle"
-                    fontSize="13" fontWeight="900" fontFamily="Arial, sans-serif" fill="#1a1a1a">
+                <text
+                    x="50%"
+                    y="55%"
+                    dominantBaseline="middle"
+                    textAnchor="middle"
+                    fontSize="13"
+                    fontWeight="900"
+                    fontFamily="Arial, sans-serif"
+                    fill="#1a1a1a"
+                >
                     MTN
                 </text>
             </svg>
@@ -713,27 +882,54 @@ function ProviderLogo({ provider, size = 28 }: { provider: MoMoProvider; size?: 
     return (
         <svg width={size} height={size} viewBox="0 0 40 40" fill="none">
             <circle cx="20" cy="20" r="20" fill="#FF6600" />
-            <text x="50%" y="55%" dominantBaseline="middle" textAnchor="middle"
-                fontSize="9" fontWeight="900" fontFamily="Arial, sans-serif" fill="white">
+            <text
+                x="50%"
+                y="55%"
+                dominantBaseline="middle"
+                textAnchor="middle"
+                fontSize="9"
+                fontWeight="900"
+                fontFamily="Arial, sans-serif"
+                fill="white"
+            >
                 ORANGE
             </text>
         </svg>
     );
 }
 
-/* ── Shared icons ── */
 function PhoneIcon() {
     return (
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
             <rect x="5" y="2" width="14" height="20" rx="2" />
             <path d="M12 18h.01" />
         </svg>
     );
 }
+
 function CardIcon() {
     return (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20" />
+        <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            <rect x="2" y="5" width="20" height="14" rx="2" />
+            <path d="M2 10h20" />
         </svg>
     );
 }
