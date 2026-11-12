@@ -20,9 +20,9 @@ import { formatAmount } from "@/app/(dashboard)/dashboard/my/keys/data/mockKeys"
 // Based on its own relative import ("../keys/new-key-modal/ModalPrimitives"), it's a sibling
 // of the "keys" folder under components/dashboard/my/ -- adjust the folder name below.
 import { PaymentModal, type PaymentModalContext } from "@/components/dashboard/my/payment/PaymentModal";
+import { LIFETIME_UPGRADE_AMOUNT, LIFETIME_UPGRADE_AMOUNT_WITH_DEDUCTION_UPON_PURCHASE } from "@/app/utils/constants";
 import Link from "next/link";
 
-const LIFETIME_UPGRADE_AMOUNT = 14500;
 
 export function BusinessesClient() {
     const toast = useToast();
@@ -282,7 +282,7 @@ export function BusinessesClient() {
                 success: "Key upgraded",
             },
             subtitles: {
-                idle: `Pay ${formatAmount(LIFETIME_UPGRADE_AMOUNT)} to upgrade "${upgradeTarget.name}" to a Lifetime access key.`,
+                idle: `Pay ${upgradeTarget?.access_key?.deduct_trial_fee ? formatAmount(LIFETIME_UPGRADE_AMOUNT_WITH_DEDUCTION_UPON_PURCHASE) : formatAmount(LIFETIME_UPGRADE_AMOUNT)} to upgrade "${upgradeTarget.name}" to a Lifetime access key.`,
                 success: "Your access key has been upgraded to Lifetime.",
             },
             amountBanner: {
@@ -306,15 +306,12 @@ export function BusinessesClient() {
     }
 
     /* ── Edit stub ── */
-    function handleEdit(b: Business) {}
+    function handleEdit(b: Business) { }
 
+    // Loading: the skeleton REPLACES the page (header, filters, table) instead of
+    // sitting next to it, and mirrors its layout so nothing jumps when data arrives.
     if (isLoading) {
-        return (
-            <div className="flex h-64 flex-col items-center justify-center space-y-3 rounded-xl border border-dashed border-gray-200 bg-gray-50/50 p-6 text-center">
-                <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-900 border-t-transparent" />
-                <p className="text-sm font-medium text-gray-500">Retrieving secure business records...</p>
-            </div>
-        );
+        return <BusinessesSkeleton />;
     }
 
     if (authError) {
@@ -411,7 +408,7 @@ export function BusinessesClient() {
             {/* Trial -> Lifetime key upgrade payment */}
             {upgradeTarget?.access_key && (
                 <PaymentModal
-                    amount={LIFETIME_UPGRADE_AMOUNT}
+                    amount={upgradeTarget?.access_key?.deduct_trial_fee ? LIFETIME_UPGRADE_AMOUNT_WITH_DEDUCTION_UPON_PURCHASE : LIFETIME_UPGRADE_AMOUNT}
                     onBeforePay={handleUpgradeBeforePay}
                     onSuccess={handleUpgradeSuccess}
                     preflightError={upgradePreflightError}
@@ -420,5 +417,162 @@ export function BusinessesClient() {
                 />
             )}
         </>
+    );
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Loading skeleton
+   Mirrors BusinessesHeader + BusinessesTable so the layout doesn't shift
+   once the real data renders. Uses the same theme variables as the app,
+   so it works in light and dark mode.
+   ───────────────────────────────────────────────────────────────── */
+
+const SKELETON_ROWS = 8;
+
+// Cycled per row so the bars don't look like a uniform stamp.
+const NAME_WIDTHS = ["w-24", "w-28", "w-20", "w-32"];
+const MANAGER_WIDTHS = ["w-28", "w-24", "w-32", "w-28"];
+const EMAIL_WIDTHS = ["w-36", "w-32", "w-40", "w-36"];
+const LOCATION_WIDTHS = ["w-24", "w-28", "w-20", "w-24"];
+
+const TABLE_HEADINGS = ["#", "Business", "Manager", "Location", "Access key", "Partner", "Created", "Updated"];
+
+function Bone({ className = "", style }: { className?: string; style?: React.CSSProperties }) {
+    return (
+        <div
+            className={`animate-pulse rounded-md motion-reduce:animate-none ${className}`}
+            style={{ background: "var(--border)", ...style }}
+        />
+    );
+}
+
+function BusinessesSkeleton() {
+    return (
+        <div className="space-y-5" role="status" aria-busy="true" aria-live="polite">
+            <span className="sr-only">Loading businesses…</span>
+
+            {/* Header: title + actions */}
+            <div className="flex items-start justify-between gap-4">
+                <div className="space-y-2">
+                    <Bone className="h-6 w-36" />
+                    <Bone className="h-3.5 w-28" />
+                </div>
+                <div className="flex items-center gap-2">
+                    <Bone className="h-9 w-20 rounded-lg" />
+                    <Bone className="h-9 w-32 rounded-lg" />
+                </div>
+            </div>
+
+            {/* Filters */}
+            <div className="flex flex-wrap items-center gap-2">
+                <Bone className="h-9 w-full max-w-[320px] rounded-lg" />
+                <Bone className="h-9 w-32 rounded-lg" />
+                <Bone className="h-9 w-36 rounded-lg" />
+                <Bone className="h-9 w-40 rounded-lg" />
+                <Bone className="h-9 w-32 rounded-lg" />
+            </div>
+
+            {/* Table */}
+            <div
+                className="overflow-hidden rounded-xl border"
+                style={{ background: "var(--surface)", borderColor: "var(--border)" }}
+            >
+                <div className="overflow-x-auto">
+                    <table className="w-full border-collapse text-[13px]">
+                        <thead>
+                            <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--surface-muted)" }}>
+                                {TABLE_HEADINGS.map((h) => (
+                                    <th
+                                        key={h}
+                                        className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap"
+                                        style={{ color: "var(--text-subtle)" }}
+                                    >
+                                        {h}
+                                    </th>
+                                ))}
+                                <th className="w-12" />
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {Array.from({ length: SKELETON_ROWS }).map((_, i) => (
+                                <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
+                                    {/* # */}
+                                    <td className="px-4 py-3.5">
+                                        <Bone className="h-3 w-6" />
+                                    </td>
+
+                                    {/* Business */}
+                                    <td className="px-4 py-3.5">
+                                        <div className="space-y-1.5">
+                                            <Bone className={`h-3.5 ${NAME_WIDTHS[i % NAME_WIDTHS.length]}`} />
+                                            <Bone className="h-2.5 w-16" />
+                                        </div>
+                                    </td>
+
+                                    {/* Manager */}
+                                    <td className="px-4 py-3.5">
+                                        <div className="flex items-center gap-2.5">
+                                            <Bone className="h-7 w-7 shrink-0 rounded-full" />
+                                            <div className="space-y-1.5">
+                                                <Bone className={`h-3.5 ${MANAGER_WIDTHS[i % MANAGER_WIDTHS.length]}`} />
+                                                <Bone className={`h-2.5 ${EMAIL_WIDTHS[i % EMAIL_WIDTHS.length]}`} />
+                                            </div>
+                                        </div>
+                                    </td>
+
+                                    {/* Location */}
+                                    <td className="px-4 py-3.5">
+                                        <Bone className={`h-3.5 ${LOCATION_WIDTHS[i % LOCATION_WIDTHS.length]}`} />
+                                    </td>
+
+                                    {/* Access key */}
+                                    <td className="px-4 py-3.5">
+                                        <div className="flex items-center gap-2">
+                                            <Bone className="h-5 w-12 rounded-full" />
+                                            <Bone className="h-5 w-[70px] rounded-full" />
+                                        </div>
+                                    </td>
+
+                                    {/* Partner */}
+                                    <td className="px-4 py-3.5">
+                                        <Bone className="h-3.5 w-16" />
+                                    </td>
+
+                                    {/* Created */}
+                                    <td className="px-4 py-3.5">
+                                        <Bone className="h-3.5 w-24" />
+                                    </td>
+
+                                    {/* Updated */}
+                                    <td className="px-4 py-3.5">
+                                        <Bone className="h-3.5 w-24" />
+                                    </td>
+
+                                    {/* Row menu */}
+                                    <td className="px-3 py-3.5">
+                                        <Bone className="h-4 w-1.5" />
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* Pagination */}
+                <div
+                    className="flex items-center justify-between px-4 py-3"
+                    style={{ borderTop: "1px solid var(--border)" }}
+                >
+                    <Bone className="h-3 w-28" />
+                    <div className="flex items-center gap-1">
+                        <Bone className="h-7 w-7" />
+                        <Bone className="h-7 w-7" />
+                        <Bone className="h-7 w-7" />
+                        <Bone className="h-7 w-7" />
+                        <Bone className="h-7 w-7" />
+                    </div>
+                </div>
+            </div>
+        </div>
     );
 }

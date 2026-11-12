@@ -7,3 +7,5 @@ export const SUPPORT_WHATSAPP_LINK = `https://wa.me/${SUPPORT_WHATSAPP_NUMBER.re
 
 export const WHATSAPP_CHANNEL_URL = " https://chat.whatsapp.com/KebTdt8NQhNAQdGya6O9eW"; // Replace with your actual Channel link
 export const WHATSAPP_CHANNEL_PARTNER_GROUP_URL = "https://chat.whatsapp.com/J7FlQ0jtAugDZqe5xlluXb"; // Replace with your actual Group link
+export const LIFETIME_UPGRADE_AMOUNT_WITH_DEDUCTION_UPON_PURCHASE = 14500;
+export const LIFETIME_UPGRADE_AMOUNT = 15000;

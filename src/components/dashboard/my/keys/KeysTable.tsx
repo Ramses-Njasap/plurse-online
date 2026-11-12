@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect, useRef } from "react";
 import { getExpiryStatus, formatDate, maskKeyCode, formatAmount } from "@/app/(dashboard)/dashboard/my/keys/data/mockKeys";
 import type { AccessKey } from "@/types/users.types";
 import { KeyRowMenu } from "./KeyRowMenu";
@@ -36,6 +37,75 @@ const KEY_TYPE_BADGE: Record<string, { label: string; bg: string; color: string 
     TRIAL: { label: "Trial", bg: "rgba(245,158,11,0.10)", color: "#d97706" },
     LIFETIME: { label: "Lifetime", bg: "rgba(59,130,246,0.10)", color: "#3b82f6" },
 };
+
+/* ─────────────────────────────────────────────────────────────────
+   Key helpers (copy + download)
+   ───────────────────────────────────────────────────────────────── */
+
+function buildKeyFileContent(k: AccessKey): string {
+    const created = k.created_on || (k as any).created_at;
+    const createdStr = created ? new Date(created).toUTCString() : "—";
+
+    return [
+        "═══════════════════════════════════════════",
+        "  PLURSE ACTIVATION KEY",
+        "═══════════════════════════════════════════",
+        "",
+        `  Key code   : ${k.key_code}`,
+        `  Key type   : ${String(k.key_type).toLowerCase()}`,
+        `  Key ID     : ${k.id}`,
+        `  Amount     : ${k.amount} XAF`,
+        `  Created    : ${createdStr}`,
+        "",
+        "───────────────────────────────────────────",
+        "  IMPORTANT",
+        "───────────────────────────────────────────",
+        "  Keep this file safe. Your activation key",
+        "  is required to run Plurse and will not",
+        "  be shown again in full after first view.",
+        "",
+        "  To activate: open Plurse → Enter key",
+        "  when prompted on first launch.",
+        "",
+        "  Support: support@plurse.com",
+        "═══════════════════════════════════════════",
+        "",
+    ].join("\n");
+}
+
+function downloadKeyFile(k: AccessKey) {
+    const blob = new Blob([buildKeyFileContent(k)], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `plurse-activation-key-${k.id}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+async function copyText(text: string): Promise<boolean> {
+    try {
+        await navigator.clipboard.writeText(text);
+        return true;
+    } catch {
+        // Fallback for non-secure contexts / older browsers
+        try {
+            const ta = document.createElement("textarea");
+            ta.value = text;
+            ta.style.position = "fixed";
+            ta.style.opacity = "0";
+            document.body.appendChild(ta);
+            ta.select();
+            const ok = document.execCommand("copy");
+            document.body.removeChild(ta);
+            return ok;
+        } catch {
+            return false;
+        }
+    }
+}
 
 export function KeysTable({
     keys, page, totalPages, totalCount, pageSize,
@@ -133,8 +203,11 @@ export function KeysTable({
 
                                         {/* Key code */}
                                         <td className="px-4 py-3.5">
-                                            <span className="font-mono text-[12px]" style={{ color: "var(--foreground)" }}>
-                                                {maskKeyCode(k.key_code)}
+                                            <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                                                <span className="font-mono text-[12px]" style={{ color: "var(--foreground)" }}>
+                                                    {maskKeyCode(k.key_code)}
+                                                </span>
+                                                <KeyActions accessKey={k} />
                                             </span>
                                         </td>
 
@@ -263,6 +336,66 @@ export function KeysTable({
             </div>
         </div>
     );
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Key actions (copy + download)
+   ───────────────────────────────────────────────────────────────── */
+
+function KeyActions({ accessKey }: { accessKey: AccessKey }) {
+    const [copied, setCopied] = useState(false);
+    const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+    async function handleCopy() {
+        const ok = await copyText(accessKey.key_code);
+        if (!ok) return;
+        setCopied(true);
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(() => setCopied(false), 1500);
+    }
+
+    const btn = "flex h-6 w-6 items-center justify-center rounded-md transition-colors";
+
+    return (
+        <span className="inline-flex items-center gap-0.5">
+            <button
+                type="button"
+                onClick={handleCopy}
+                className={btn}
+                style={{ color: copied ? "#16a34a" : "var(--text-subtle)" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                aria-label={copied ? "Key copied" : "Copy key code"}
+                title={copied ? "Copied!" : "Copy key code"}
+            >
+                {copied ? <CheckIcon /> : <CopyIcon />}
+            </button>
+            <button
+                type="button"
+                onClick={() => downloadKeyFile(accessKey)}
+                className={btn}
+                style={{ color: "var(--text-subtle)" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                aria-label="Download key as text file"
+                title="Download key"
+            >
+                <DownloadIcon />
+            </button>
+        </span>
+    );
+}
+
+function CopyIcon() {
+    return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>;
+}
+function CheckIcon() {
+    return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>;
+}
+function DownloadIcon() {
+    return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m7 10 5 5 5-5" /><path d="M12 15V3" /></svg>;
 }
 
 function Th({ children }: { children?: React.ReactNode }) {
