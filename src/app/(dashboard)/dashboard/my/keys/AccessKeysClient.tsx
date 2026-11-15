@@ -6,6 +6,7 @@ import type { AccessKey } from "@/types/users.types";
 import { useKeyFilters } from "./hooks/useKeyFilters";
 import { KeysHeader } from "@/components/dashboard/my/keys/KeysHeader";
 import { KeysTable } from "@/components/dashboard/my/keys/KeysTable";
+import { KeysSkeleton } from "@/components/dashboard/my/keys/KeysSkeleton";
 import { DeleteSingleModal } from "@/components/dashboard/my/keys/DeleteSingleModal";
 import { DeleteBulkOffcanvas } from "@/components/dashboard/my/keys/DeleteBulkOffcanvas";
 import { NewKeyModal } from "@/components/dashboard/my/keys/new-key-modal";
@@ -230,12 +231,7 @@ export function AccessKeysClient() {
     }, [toast]);
 
     if (isLoading) {
-        return (
-            <div className="flex h-64 flex-col items-center justify-center space-y-3 rounded-xl border border-dashed border-gray-200 bg-gray-50/50 p-6 text-center">
-                <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-900 border-t-transparent" />
-                <p className="text-sm font-medium text-gray-500">Retrieving secure access keys...</p>
-            </div>
-        );
+        return <KeysSkeleton />;
     }
 
     if (authError) {
@@ -286,8 +282,8 @@ export function AccessKeysClient() {
                     onSelectOne={selectOne}
                     onSelectAll={selectAllOnPage}
                     onPageChange={setPage}
-                    onView={(k) => {}}
-                    onEdit={(k) => {}}
+                    onView={(k) => { }}
+                    onEdit={(k) => { }}
                     onDelete={handleRowDelete}
                 />
             </div>

@@ -10,6 +10,7 @@ import { fetchAuthenticatedTransactions } from "@/app/actions/transactions"; // 
 import { TransactionsHeader } from "@/components/dashboard/my/transactions/TransactionsHeader";
 import { TransactionsStats } from "@/components/dashboard/my/transactions/TransactionsStats";
 import { TransactionsTable } from "@/components/dashboard/my/transactions/TransactionsTable";
+import { TransactionsSkeleton } from "@/components/dashboard/my/transactions/TransactionsSkeleton";
 import { ViewTransactionModal } from "@/components/dashboard/my/transactions/ViewTransactionModal";
 import { useToast } from "@/components/ui";
 
@@ -17,6 +18,13 @@ const MOCK_RETRY_DELAY_MS = 1500;
 
 export function TransactionsClient() {
     const toast = useToast();
+
+    /* Keep the latest toast in a ref so loadData stays stable. If useToast() ever returns a new
+       object per render, a [toast] dependency would refetch in a loop (and flash the skeleton). */
+    const toastRef = useRef(toast);
+    useEffect(() => {
+        toastRef.current = toast;
+    }, [toast]);
 
     /* ── Data ── */
     const [liveTransactions, setLiveTransactions] = useState<Transaction[]>([]);
@@ -30,15 +38,15 @@ export function TransactionsClient() {
             if (response.success) {
                 setLiveTransactions(response.data);
             } else {
-                toast.error(response.message, { title: "Couldn't load transactions" });
+                toastRef.current.error(response.message, { title: "Couldn't load transactions" });
             }
         } catch (err) {
             console.error(err);
-            toast.error("An unexpected error occurred while loading your transactions.", { title: "Couldn't load transactions" });
+            toastRef.current.error("An unexpected error occurred while loading your transactions.", { title: "Couldn't load transactions" });
         } finally {
             setIsLoading(false);
         }
-    }, [toast]);
+    }, []);
 
     useEffect(() => {
         loadData();
@@ -101,12 +109,7 @@ export function TransactionsClient() {
 
     /* ── Loading ── */
     if (isLoading) {
-        return (
-            <div className="flex h-64 flex-col items-center justify-center space-y-3 rounded-xl border border-dashed border-gray-200 bg-gray-50/50 p-6 text-center">
-                <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-900 border-t-transparent" />
-                <p className="text-sm font-medium text-gray-500">Retrieving your transactions...</p>
-            </div>
-        );
+        return <TransactionsSkeleton />;
     }
 
     return (

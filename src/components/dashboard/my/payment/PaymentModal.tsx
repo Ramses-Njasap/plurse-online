@@ -1,19 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { formatAmount } from "@/app/(dashboard)/dashboard/my/keys/data/mockKeys";
 import type { KeyType } from "@/types/users.types";
 import { ModalShell, Field, Spinner } from "../keys/new-key-modal/ModalPrimitives";
 import { useToast } from "@/components/ui";
-import { error } from "console";
 
 /* ─────────────────────────────────────────────────────────────────
-   Types
+   Types & constants
    ───────────────────────────────────────────────────────────────── */
 
 type PaymentMethod = "mobile_money" | "card";
 type MoMoProvider = "mtn" | "orange";
 type PaymentStatus = "idle" | "processing" | "success" | "failed";
+
+const POLL_INTERVAL_MS = 5000; // check every 5 s
+const POLL_MAX_ATTEMPTS = 36; // 36 x 5 s = 3 minutes
 
 export interface PaymentModalContext {
     titles?: Partial<Record<PaymentStatus, string>>;
@@ -43,6 +46,15 @@ interface PaymentModalProps {
     preflightError?: string;
     onClose: () => void;
     context?: PaymentModalContext;
+
+    /** Call onClose() automatically after a successful payment (after onSuccess). Default: true */
+    autoCloseOnSuccess?: boolean;
+    /** Call onClose() automatically after a failed payment. Default: true */
+    autoCloseOnFailure?: boolean;
+    /** Delay before closing on success (ms). Default: 1200 */
+    successCloseDelay?: number;
+    /** Delay before closing on failure (ms). Default: 3000 */
+    failureCloseDelay?: number;
 }
 
 /* ─────────────────────────────────────────────────────────────────
@@ -58,6 +70,10 @@ export function PaymentModal({
     preflightError,
     onClose,
     context,
+    autoCloseOnSuccess = true,
+    autoCloseOnFailure = true,
+    successCloseDelay = 1200,
+    failureCloseDelay = 3000,
 }: PaymentModalProps) {
     const [method, setMethod] = useState<PaymentMethod>("mobile_money");
     const [status, setStatus] = useState<PaymentStatus>("idle");
@@ -76,6 +92,29 @@ export function PaymentModal({
     const [expiry, setExpiry] = useState("");
     const [cvv, setCvv] = useState("");
 
+    // ── Lifecycle guards: stop polling / timers once the modal is gone ──
+    const mountedRef = useRef(true);
+    const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+            timersRef.current.forEach(clearTimeout);
+            timersRef.current = [];
+        };
+    }, []);
+
+    function schedule(fn: () => void, ms: number) {
+        const id = setTimeout(fn, ms);
+        timersRef.current.push(id);
+    }
+
+    function clearScheduled() {
+        timersRef.current.forEach(clearTimeout);
+        timersRef.current = [];
+    }
+
     const canPayMomo = phone.replace(/\s/g, "").length >= 9;
     const canPayCard =
         cardName.trim().length > 0 &&
@@ -85,33 +124,56 @@ export function PaymentModal({
     const canPay = method === "mobile_money" ? canPayMomo : canPayCard;
 
     // ──────────────────────────────────────────────────────────────
-    // Polling helper (Fapshi statuses)
+    // Failure helper: one place that fails the payment + closes
     // ──────────────────────────────────────────────────────────────
-    async function pollPaymentStatus(transId: string, maxAttempts = 24) {
-        for (let i = 0; i < maxAttempts; i++) {
-            await new Promise((r) => setTimeout(r, 20000)); // every 5 s
+    function failPayment(message: string) {
+        if (!mountedRef.current) return;
+        setErrorMsg(message);
+        setStatus("failed");
+        toast.error(message);
+
+        if (autoCloseOnFailure) {
+            schedule(onClose, failureCloseDelay);
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Polling helper (Fapshi statuses). Returns a result, never toasts,
+    // so the caller decides what to show.
+    // ──────────────────────────────────────────────────────────────
+    async function pollPaymentStatus(
+        transId: string
+    ): Promise<{ ok: boolean; message?: string; cancelled?: boolean }> {
+        for (let i = 0; i < POLL_MAX_ATTEMPTS; i++) {
+            await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+
+            // Modal was closed/unmounted while waiting → stop polling
+            if (!mountedRef.current) return { ok: false, cancelled: true };
 
             try {
                 const res = await fetch(`/api/pay/status?ref=${encodeURIComponent(transId)}`);
                 const data = await res.json();
-                console.log("Payment status poll:", data);
 
                 if (data.status === "SUCCESSFUL") {
-                    return true;
+                    return { ok: true };
                 }
                 if (data.status === "FAILED" || data.status === "EXPIRED") {
-                    toast.error(data.message || "Payment was declined or expired.");
-                    return false;
+                    return {
+                        ok: false,
+                        message: data.message || "Payment was declined or expired.",
+                    };
                 }
                 // CREATED / PENDING → keep waiting
             } catch (err) {
-                // network error – continue polling
+                // network error – keep polling
                 console.warn("Status poll error:", err);
-                toast.warning("Network error while checking payment status. Retrying...");
             }
         }
-        toast.dismiss("Payment timed out. Please check your phone or try again.");
-        return false;
+
+        return {
+            ok: false,
+            message: "Payment timed out. Please check your phone or try again.",
+        };
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -119,6 +181,13 @@ export function PaymentModal({
     // ──────────────────────────────────────────────────────────────
     async function handlePay() {
         if (!canPay) return;
+
+        // Card isn't supported yet: stay on the form, no processing screen
+        if (method === "card") {
+            toast.error("Card payments are not yet available. Please use Mobile Money.");
+            return;
+        }
+
         setStatus("processing");
         setErrorMsg("");
 
@@ -126,61 +195,61 @@ export function PaymentModal({
             // 1. Pre-flight DB check
             const isReady = await onBeforePay();
             if (!isReady) {
-                setStatus("failed");
-                setErrorMsg(
+                failPayment(
                     preflightError || "Database sync failed before transaction could initiate."
                 );
                 return;
             }
 
-            if (method === "mobile_money") {
-                // 2. Call your backend (Fapshi Direct Pay)
-                const res = await fetch("/api/pay", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        amount,
-                        phone: phone.replace(/\s/g, ""),
-                        provider, // "mtn" | "orange"
-                        email: "ramsesnjasap11@gmail.com", // replace with real user data if available
-                        name: "Valued Customer",
-                    }),
-                });
+            // 2. Call your backend (Fapshi Direct Pay)
+            const res = await fetch("/api/pay", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    amount,
+                    phone: phone.replace(/\s/g, ""),
+                    provider, // "mtn" | "orange"
+                    email: "ramsesnjasap11@gmail.com", // replace with real user data if available
+                    name: "Valued Customer",
+                }),
+            });
 
-                const data = await res.json();
+            const data = await res.json();
 
-
-                if (!res.ok) {
-                    toast.error(data.error || "Payment initiation failed.");
-                    return false;
-                }
-
-                // Store references
-                setTxnId(data.transaction_reference || data.fapshi_trans_id);
-
-                // 3. Poll until SUCCESSFUL / FAILED
-                const paymentSuccess = await pollPaymentStatus(data.fapshi_trans_id);
-
-                if (!paymentSuccess) {
-                    console.warn("Payment failed or timed out for transaction:", data.fapshi_trans_id);
-                    return false;
-                }
-
-                setStatus("success");
-                setTimeout(() => onSuccess(data.transaction_reference || data.fapshi_trans_id), 1200);
-            } else {
-                toast.error("Card payments are not yet available. Please use Mobile Money.");
-                return false;
+            if (!res.ok) {
+                failPayment(data.error || "Payment initiation failed.");
+                return;
             }
+
+            const reference: string = data.transaction_reference || data.fapshi_trans_id;
+            setTxnId(reference);
+
+            // 3. Poll until SUCCESSFUL / FAILED / EXPIRED / timeout
+            const result = await pollPaymentStatus(data.fapshi_trans_id);
+
+            if (result.cancelled) return; // modal already closed
+
+            if (!result.ok) {
+                failPayment(result.message || "Payment failed.");
+                return;
+            }
+
+            // 4. Success → show success state, then notify parent and close
+            if (!mountedRef.current) return;
+            setStatus("success");
+
+            schedule(() => {
+                onSuccess(reference);
+                if (autoCloseOnSuccess) onClose();
+            }, successCloseDelay);
         } catch (err) {
             const message = err instanceof Error ? err.message : "Payment failed.";
-            setErrorMsg(message);
-            toast.error(message);
-            setStatus("failed");
+            failPayment(message);
         }
     }
 
     function handleRetry() {
+        clearScheduled(); // cancel the pending auto-close
         setStatus("idle");
         setErrorMsg("");
         setCvv("");
@@ -217,7 +286,7 @@ export function PaymentModal({
         "Test: use any number — end in 0000 to simulate failure.";
     const successMessage = context?.successMessage ?? defaultSuccessMessage;
 
-    return (
+    const modal = (
         <ModalShell
             title={titleMap[status]}
             subtitle={subtitleMap[status]}
@@ -279,7 +348,7 @@ export function PaymentModal({
                     <div className="space-y-2">
                         <button
                             type="button"
-                            disabled={!canPay}
+                            disabled={!canPay || isPreparing}
                             onClick={handlePay}
                             className="h-[44px] w-full rounded-xl text-[14px] font-semibold text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                             style={{ background: "var(--brand)" }}
@@ -328,6 +397,12 @@ export function PaymentModal({
             )}
         </ModalShell>
     );
+
+    // Render at <body> level so ancestors with a CSS transform / z-index / overflow
+    // (e.g. the sidebar <aside>) cannot break `position: fixed` on the overlay.
+    // All hooks have already run above, so this early return is safe.
+    if (typeof document === "undefined") return null;
+    return createPortal(modal, document.body);
 }
 
 /* ─────────────────────────────────────────────────────────────────
