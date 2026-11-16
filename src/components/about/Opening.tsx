@@ -30,7 +30,7 @@ const Opening = () => {
                         fontFamily: "var(--font-geist-sans)",
                     }}
                 >
-                    Building the operating
+                    Building the operating{" "}
                     <br className="hidden sm:block" />
                     system for{" "}
                     <span style={{ color: "var(--brand)" }}>African business.</span>
