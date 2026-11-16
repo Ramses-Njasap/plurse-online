@@ -1,6 +1,7 @@
 import Navbar from "@/components/Navbar";
 import GridBackground from "@/components/Background";
 import { ToastProvider } from "@/components/ui";
+import { Analytics } from "@vercel/analytics/next"
 
 export default function MarketingLayout({
     children,
@@ -15,6 +16,7 @@ export default function MarketingLayout({
 
                 <main className="relative z-10 flex-1 pt-[68px]">
                     {children}
+                    <Analytics />
                 </main>
             </div>
         </ToastProvider>
