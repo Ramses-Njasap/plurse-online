@@ -6,6 +6,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
 import { BellIcon, SettingsIcon } from "@/components/icons/icons";
+import { UserSessionPayload } from "@/app/utils/auth";
+import { formatShortName } from "@/app/utils/func";
 
 const PAGE_TITLES: Record<string, string> = {
     "/dashboard": "Overview",
@@ -45,9 +47,10 @@ function LogOutIcon({ size = 15 }: { size?: number }) {
 interface DashboardTopbarProps {
     mobileNavOpen: boolean;
     onMenuClick: () => void;
+    currentUser: UserSessionPayload | null;
 }
 
-export function DashboardTopbar({ mobileNavOpen, onMenuClick }: DashboardTopbarProps) {
+export function DashboardTopbar({ mobileNavOpen, onMenuClick, currentUser }: DashboardTopbarProps) {
     const pathname = usePathname();
     const router = useRouter();
     const title = PAGE_TITLES[pathname] ?? "Dashboard";
@@ -165,10 +168,10 @@ export function DashboardTopbar({ mobileNavOpen, onMenuClick }: DashboardTopbarP
                         >
                             <div className="border-b px-3.5 py-2.5" style={{ borderColor: "var(--border)" }}>
                                 <p className="truncate text-[12.5px] font-medium" style={{ color: "var(--foreground)" }}>
-                                    Your name
+                                    {formatShortName(currentUser?.fullName) || "Anonymous User"}
                                 </p>
                                 <p className="truncate text-[11px]" style={{ color: "var(--text-subtle)" }}>
-                                    you@business.com
+                                    {currentUser?.email || "you@business.com"}
                                 </p>
                             </div>
 

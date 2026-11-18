@@ -7,6 +7,7 @@ import type {
     UserProfile,
     ChannelPartner,
 } from "@/types/users.types";
+import { updatePersistentStorage } from "@/app/utils/auth";
 
 import { revalidatePath } from "next/cache";
 
@@ -192,6 +193,11 @@ export async function updatePersonalProfile(
 
         if (error) throw error;
 
+        if (payload.full_name) {
+            // Update the persistent session cookie with the new full name
+            await updatePersistentStorage(payload.full_name, undefined);
+        }
+
         revalidatePath("/dashboard/my/settings");
         return { success: true, message: "Profile updated successfully." };
     } catch (err: any) {
@@ -225,6 +231,11 @@ export async function updateContacts(
             .eq("id", currentUser.id);
 
         if (error) throw error;
+
+        if (payload.email) {
+            // Update the persistent session cookie with the new email
+            await updatePersistentStorage(undefined, payload.email);
+        }
 
         revalidatePath("/dashboard/my/settings");
         return { success: true, message: "Contacts updated successfully." };

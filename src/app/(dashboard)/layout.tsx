@@ -1,5 +1,6 @@
 // app/dashboard/layout.tsx
 import type { Metadata } from "next";
+import { whichUser } from "@/app/utils/auth";
 import "../globals.css";
 
 import { DashboardShell } from "@/components/dashboard/layout/DashboardShell";
@@ -23,10 +24,11 @@ export const metadata: Metadata = {
     },
 };
 
-export default function DashboardLayout({
+export default async function DashboardLayout({
     children,
 }: {
     children: React.ReactNode;
 }) {
-    return <DashboardShell>{children}</DashboardShell>;
+    const currentUser = await whichUser.info;
+    return <DashboardShell currentUser={currentUser}>{children}</DashboardShell>;
 }

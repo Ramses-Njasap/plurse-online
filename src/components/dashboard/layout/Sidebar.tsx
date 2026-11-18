@@ -3,6 +3,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { UserSessionPayload } from "@/app/utils/auth";
+import { formatShortName } from "@/app/utils/func";
 
 import { GridIcon, EnterpriseIcon, KeyIcon, WalletIcon, SettingsIcon, UsersIcon } from "@/components/icons/icons";
 import { ChannelPartnerPromoBanner } from "@/components/dashboard/my/shared/ChannelPartnerPromoBanner";
@@ -21,9 +23,10 @@ const BOTTOM_NAV = [
 interface DashboardSidebarProps {
     open: boolean;
     onClose: () => void;
+    currentUser: UserSessionPayload | null;
 }
 
-export function DashboardSidebar({ open, onClose }: DashboardSidebarProps) {
+export function DashboardSidebar({ open, onClose, currentUser }: DashboardSidebarProps) {
     const pathname = usePathname();
 
     return (
@@ -165,10 +168,10 @@ export function DashboardSidebar({ open, onClose }: DashboardSidebarProps) {
                         </div>
                         <div className="min-w-0">
                             <p className="truncate text-[12px] font-medium" style={{ color: "var(--foreground)" }}>
-                                Your name
+                                {formatShortName(currentUser?.fullName) || "Anonymous User"}
                             </p>
                             <p className="truncate text-[11px]" style={{ color: "var(--text-subtle)" }}>
-                                you@business.com
+                                {currentUser?.email || "you@business.com"}
                             </p>
                         </div>
                     </div>

@@ -10,6 +10,7 @@ export type UserSessionPayload = {
     id: string;
     email: string;
     phone: string | null;
+    fullName?: string | null;
     accountType: "individual" | "business";
     isActive: boolean;
     isChannelPartner?: boolean;
@@ -20,6 +21,7 @@ export type UserSessionPayload = {
  * Encrypts user metadata into a secure cookie upon successful OTP verification.
  */
 export async function createPersistentSession(user: UserSessionPayload) {
+    console.log("Creating persistent session for user:", user);
     const token = await new SignJWT({ ...user })
         .setProtectedHeader({ alg: "HS256" })
         .setIssuedAt()
@@ -34,6 +36,47 @@ export async function createPersistentSession(user: UserSessionPayload) {
         path: "/",
     });
 }
+
+
+/**
+- Session Patcher: Appends or updates the user's fullName inside the existing session cookie
+- Must be called from a Server Action or Route Handler.
+ */
+export async function updatePersistentStorage(fullName?: string, email?: string): Promise<UserSessionPayload | null> {
+    const cookieStore = await cookies();
+    const token = cookieStore.get(COOKIE_NAME)?.value;
+    if (!token) return null;
+
+    try {
+        const { payload } = await jwtVerify(token, JWT_SECRET, { algorithms: ["HS256"] });
+        const { iat, exp, ...existingUser } = payload as UserSessionPayload & { iat?: number; exp?: number };
+
+        const updatedUser: UserSessionPayload = {
+            ...existingUser,
+            fullName: fullName ? fullName : existingUser.fullName,
+            email: email ? email : existingUser.email,
+        };
+
+        const jwt = new SignJWT({ ...updatedUser })
+            .setProtectedHeader({ alg: "HS256" })
+            .setIssuedAt()
+            .setExpirationTime(exp ?? "7d"); // Preserves original session expiry
+
+        const newToken = await jwt.sign(JWT_SECRET);
+
+        cookieStore.set(COOKIE_NAME, newToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "lax",
+            path: "/",
+        });
+
+        return updatedUser;
+    } catch {
+        return null;
+    }
+}
+
 
 /**
  * Microsecond Guard: Checks if there is an active session in local browser storage

@@ -68,7 +68,7 @@ export async function loginAction(payload: { email: string; password: string }) 
         // HEALING LAYER B: Provision missing row in "user_profiles" table
         let { data: profile, error: profileFetchError } = await supabaseAdmin
             .from("user_profiles")
-            .select("id")
+            .select("id, full_name, is_channel_partner")
             .eq("id", user.id)
             .maybeSingle();
 
@@ -110,6 +110,7 @@ export async function loginAction(payload: { email: string; password: string }) 
             id: user.id,
             email: emailLower,
             phone: user.phone,
+            fullName: profile?.full_name,
             accountType: user.is_business ? "business" : "individual",
             isActive: true,
         });

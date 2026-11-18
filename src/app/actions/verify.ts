@@ -50,6 +50,7 @@ export async function verifyOtpAction(email: string, typedCode: string) {
             id: user.id,
             email: email.trim().toLowerCase(),
             phone: user.phone,
+            fullName: "Anonymous User", // Placeholder until user updates their profile
             accountType: user.is_business ? "business" : "individual",
             isActive: true
         });
